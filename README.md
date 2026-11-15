@@ -30,8 +30,8 @@ snapshot. It must not imply that FAH produces 60 new snapshots per second.
 - Windows: a native `.scr` host with Vulkan rendering.
 - Browser comparison: equivalent WebGL rendering in a system web view.
 
-Vulkan on Windows replaces the earlier Direct3D proposal. Keep protein data,
-playback and scene definitions independent of Windows APIs where practical.
+Use Vulkan on Windows to keep a future Linux renderer possible. Keep protein
+data, playback and scene definitions independent of Windows APIs where practical.
 A future Linux version will still need its own host and platform integration.
 Linux is not part of the initial release.
 
@@ -72,6 +72,9 @@ The ordinary v8 data flow appears to need no helper on the folding host. Verify
 installed-client compatibility and network access before confirming this.
 
 ## Investigation sequence
+
+The [performance comparison plan](docs/performance-plan.md) defines the trial
+conditions, measurements and proposed acceptance criteria.
 
 1. Identify the installed FAH version. Capture a real topology and multiple
    snapshots without changing or interrupting folding.
