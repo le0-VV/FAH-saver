@@ -1,0 +1,5 @@
+/build*/
+/captures/
+/results/
+.DS_Store
+*.user
