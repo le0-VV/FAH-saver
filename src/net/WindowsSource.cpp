@@ -131,8 +131,10 @@ class WindowsSource final : public Source {
                 emit(SourceEvent::Kind::Status, "Connecting to FAH");
                 connectAndReceive();
                 closeConnection();
+                emit(SourceEvent::Kind::Reset, "FAH connection ended");
             } catch (const std::exception& error) {
                 closeConnection();
+                emit(SourceEvent::Kind::Reset, "FAH connection ended");
                 emit(SourceEvent::Kind::Error, error.what());
                 active_ = false;
                 return;

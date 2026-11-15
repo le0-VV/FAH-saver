@@ -14,6 +14,7 @@ struct SourceOptions {
 };
 
 struct SourceEvent {
+    // Reset clears the displayed model on WU change, reconnect or disconnection.
     enum class Kind { Reset, Topology, Frame, Status, Error };
     Kind kind = Kind::Status;
     std::string unit;

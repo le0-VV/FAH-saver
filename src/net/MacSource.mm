@@ -38,6 +38,7 @@ struct MacState : std::enable_shared_from_this<MacState> {
     void fail(std::string message, bool reconnect) {
         if (!active) return;
         releaseConnection();
+        emit(SourceEvent::Kind::Reset, "FAH connection ended");
         if (!reconnect) {
             emit(SourceEvent::Kind::Error, std::move(message));
             active = false;
@@ -73,7 +74,7 @@ struct MacState : std::enable_shared_from_this<MacState> {
                 auto self = weak.lock();
                 if (!self || !self->active || self->generation != version) return;
                 if (error) {
-                    self->fail("FAH connection lost", self->retryable(error));
+                    self->fail("FAH connection failed (URL error " + std::to_string(error.code) + ")", self->retryable(error));
                     return;
                 }
                 if (message.type != NSURLSessionWebSocketMessageTypeString) {
