@@ -86,7 +86,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     double _firstTime;
     NSString *_lastError;
     std::vector<double> _cpuMilliseconds, _gpuMilliseconds, _presentedTimes;
-    NSUInteger _submitted, _completed, _gpuErrors, _droppedMetricSamples;
+    NSUInteger _submitted, _completed, _gpuErrors, _droppedMetricSamples, _metricGeneration;
 }
 
 - (instancetype)initWithDevice:(id<MTLDevice>)device error:(NSError **)error {
@@ -181,6 +181,18 @@ static NSDictionary *summary(const std::vector<double>& values) {
     _scene = {};
     _atomCount = _bondCount = 0;
     _dirty = true;
+}
+
+- (void)beginMeasurement {
+    [_lastCommand waitUntilCompleted];
+    @synchronized(self) {
+        ++_metricGeneration;
+        _cpuMilliseconds.clear();
+        _gpuMilliseconds.clear();
+        _presentedTimes.clear();
+        _submitted = _completed = _droppedMetricSamples = 0;
+        _options.collectMetrics = true;
+    }
 }
 
 - (void)updateSceneAtTime:(double)elapsed {
@@ -293,6 +305,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     }
     [encoder endEncoding];
     const bool metrics = _options.collectMetrics;
+    const NSUInteger generation = _metricGeneration;
     if (metrics) {
         @synchronized(self) {
             ++_submitted;
@@ -301,19 +314,19 @@ static NSDictionary *summary(const std::vector<double>& values) {
         }
         if (drawable) [drawable addPresentedHandler:^(id<MTLDrawable> presented) {
             @synchronized(self) {
-                if (presented.presentedTime > 0 && self->_presentedTimes.size() < 1000000)
+                if (generation == self->_metricGeneration && presented.presentedTime > 0 && self->_presentedTimes.size() < 1000000)
                     self->_presentedTimes.push_back(presented.presentedTime);
             }
         }];
     }
     [command addCompletedHandler:^(id<MTLCommandBuffer> finished) {
         @synchronized(self) {
-            if (metrics) ++self->_completed;
+            if (metrics && generation == self->_metricGeneration) ++self->_completed;
             if (finished.status == MTLCommandBufferStatusError) {
                 ++self->_gpuErrors;
                 self->_lastError = finished.error.localizedDescription;
             }
-            if (metrics && finished.GPUEndTime > finished.GPUStartTime && self->_gpuMilliseconds.size() < 1000000)
+            if (metrics && generation == self->_metricGeneration && finished.GPUEndTime > finished.GPUStartTime && self->_gpuMilliseconds.size() < 1000000)
                 self->_gpuMilliseconds.push_back((finished.GPUEndTime-finished.GPUStartTime)*1000);
         }
     }];

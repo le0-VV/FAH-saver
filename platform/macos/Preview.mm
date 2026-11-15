@@ -12,8 +12,11 @@
 static void pumpUntil(double deadline) {
     while (CACurrentMediaTime() < deadline) {
         @autoreleasepool {
-            [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode
-                beforeDate:[NSDate dateWithTimeIntervalSinceNow:std::min(.01,deadline-CACurrentMediaTime())]];
+            NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                untilDate:[NSDate dateWithTimeIntervalSinceNow:std::max(0.0,deadline-CACurrentMediaTime())]
+                inMode:NSDefaultRunLoopMode dequeue:YES];
+            if (event) [NSApp sendEvent:event];
+            [NSApp updateWindows];
         }
     }
 }
@@ -48,9 +51,9 @@ int main(int argc, const char *argv[]) {
         try {
             std::string capturePath, sourceURL, unit, screenshotPath;
             FAHRenderOptions options;
-            options.collectMetrics = true;
+            options.collectMetrics = false;
             int width = 1024, height = 768;
-            double seconds = 10;
+            double seconds = 10, warmup = 0;
             bool offscreen = false;
             for (int i=1; i<argc; ++i) {
                 const std::string flag = argv[i];
@@ -58,7 +61,7 @@ int main(int argc, const char *argv[]) {
                     std::puts("FAH Metal preview/benchmark\n"
                         "  --capture PATH | --source ws://HOST:7396/api/websocket [--unit ID]\n"
                         "  --style 1|2|3|cycle|random --playback latest|loop --fps 1..240\n"
-                        "  --background sky|solid --colour R,G,B --seconds N\n"
+                        "  --background sky|solid --colour R,G,B --warmup 0..120 --seconds N\n"
                         "  --width PIXELS --height PIXELS --offscreen --screenshot PATH\n"
                         "Offscreen mode reports GPU submissions, not displayed frame rate.\n"
                         "Screenshots require --offscreen. No screensaver is installed or activated.");
@@ -72,6 +75,7 @@ int main(int argc, const char *argv[]) {
                 else if (flag == "--unit") unit = value;
                 else if (flag == "--screenshot") screenshotPath = value;
                 else if (flag == "--seconds") seconds = number(value,"duration");
+                else if (flag == "--warmup") warmup = number(value,"warm-up duration");
                 else if (flag == "--fps") {
                     const double fps = number(value,"frame-rate limit");
                     if (fps != std::floor(fps) || fps < 1 || fps > 240)
@@ -105,6 +109,7 @@ int main(int argc, const char *argv[]) {
             }
             if (capturePath.empty() == sourceURL.empty()) throw std::runtime_error("Choose exactly one of --capture or --source");
             if (seconds <= 0 || seconds > 3600) throw std::runtime_error("Duration must be greater than zero and at most 3600 seconds");
+            if (warmup < 0 || warmup > 120) throw std::runtime_error("Warm-up duration must be between zero and 120 seconds");
             if (!offscreen && !screenshotPath.empty()) throw std::runtime_error("--screenshot requires --offscreen");
             if (sourceURL.empty() && !unit.empty()) throw std::runtime_error("--unit requires --source");
             [NSApplication sharedApplication];
@@ -186,28 +191,33 @@ int main(int argc, const char *argv[]) {
                 [window center]; [window makeKeyAndOrderFront:nil];
                 [NSApp activateIgnoringOtherApps:YES];
             }
-            const double began = CACurrentMediaTime();
-            std::size_t submitted = 0;
             id<MTLCommandBuffer> lastCommand = nil;
-            while (CACurrentMediaTime()-began < seconds && (offscreen || window.isVisible)) {
-                @autoreleasepool {
-                    if (fatalError) break;
-                    if (offscreen) {
-                        lastCommand = [renderer renderToTexture:texture time:CACurrentMediaTime() drawable:nil];
-                        [lastCommand waitUntilCompleted];
-                        ++submitted;
-                        pumpUntil(began+submitted/static_cast<double>(options.fps));
-                    } else {
-                        NSString *displayStatus = statusText ? statusText : renderer.lastError;
-                        if (![statusLabel.stringValue isEqualToString:displayStatus])
-                            statusLabel.stringValue = displayStatus ? displayStatus : @"";
-                        statusLabel.hidden = !displayStatus.length;
-                        pumpUntil(std::min(began+seconds,CACurrentMediaTime()+.02));
+            auto runPhase = [&](double duration) {
+                const double began = CACurrentMediaTime();
+                std::size_t submitted = 0;
+                while (CACurrentMediaTime()-began < duration && (offscreen || window.isVisible)) {
+                    @autoreleasepool {
+                        if (fatalError) break;
+                        if (offscreen) {
+                            lastCommand = [renderer renderToTexture:texture time:CACurrentMediaTime() drawable:nil];
+                            [lastCommand waitUntilCompleted];
+                            ++submitted;
+                            pumpUntil(began+submitted/static_cast<double>(options.fps));
+                        } else {
+                            NSString *displayStatus = statusText ? statusText : renderer.lastError;
+                            if (![statusLabel.stringValue isEqualToString:displayStatus])
+                                statusLabel.stringValue = displayStatus ? displayStatus : @"";
+                            statusLabel.hidden = !displayStatus.length;
+                            pumpUntil(std::min(began+duration,CACurrentMediaTime()+.02));
+                        }
+                        if (renderer.lastError) { fatalError = renderer.lastError; break; }
                     }
-                    if (renderer.lastError) { fatalError = renderer.lastError; break; }
                 }
-            }
-            const double renderedSeconds = CACurrentMediaTime()-began;
+                return CACurrentMediaTime()-began;
+            };
+            const double actualWarmup = runPhase(warmup);
+            [renderer beginMeasurement];
+            const double renderedSeconds = runPhase(seconds);
             view.paused = YES;
             if (source) source->stop();
             [renderer stop];
@@ -220,6 +230,9 @@ int main(int argc, const char *argv[]) {
             metrics[@"mode"] = offscreen ? @"offscreen" : @"window";
             metrics[@"drawable_width"] = @(width); metrics[@"drawable_height"] = @(height);
             metrics[@"requested_seconds"] = @(seconds);
+            metrics[@"requested_warmup_seconds"] = @(warmup);
+            metrics[@"warmup_seconds"] = @(actualWarmup);
+            metrics[@"early_exit"] = @(!offscreen && !window.isVisible);
             metrics[@"elapsed_seconds"] = @(renderedSeconds);
             metrics[@"background"] = options.sky ? @"sky" : @"solid";
             metrics[@"playback"] = options.loop ? @"loop" : @"latest";

@@ -28,6 +28,7 @@ struct FAHRenderOptions {
 - (void)setOptions:(const FAHRenderOptions&)options;
 - (void)start;
 - (void)stop;
+- (void)beginMeasurement;
 - (id<MTLCommandBuffer>)renderToTexture:(id<MTLTexture>)texture
                                 time:(double)time
                             drawable:(id<CAMetalDrawable>)drawable;

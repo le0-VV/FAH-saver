@@ -20,4 +20,4 @@ set_target_properties(FAHSaver PROPERTIES
 
 add_executable(fah_macos_saver_smoke SaverSmoke.mm)
 target_compile_options(fah_macos_saver_smoke PRIVATE -fobjc-arc)
-target_link_libraries(fah_macos_saver_smoke PRIVATE fah_core "-framework AppKit" "-framework MetalKit" "-framework ScreenSaver")
+target_link_libraries(fah_macos_saver_smoke PRIVATE fah_core "-framework AppKit" "-framework MetalKit" "-framework QuartzCore" "-framework ScreenSaver")

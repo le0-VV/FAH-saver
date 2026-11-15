@@ -10,11 +10,12 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     MTKView *_metalView;
     FAHRenderer *_renderer;
     NSTextField *_status;
-    ScreenSaverDefaults *_defaults;
+    NSUserDefaults *_defaults;
     FAHRenderOptions _options;
     std::unique_ptr<fah::Source> _source;
     std::shared_ptr<fah::Capture> _liveCapture;
     NSString *_connectionStatus;
+    NSUInteger _sourceCallbackCount;
     NSWindow *_sheet;
     NSPopUpButton *_inputMode, *_playback, *_style, *_background;
     NSTextField *_sourceURL, *_unit, *_capturePath, *_fps;
@@ -22,9 +23,13 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 }
 
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview {
+    return [self initWithFrame:frame isPreview:isPreview preferences:nil];
+}
+
+- (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview preferences:(NSUserDefaults *)preferences {
     self = [super initWithFrame:frame isPreview:isPreview];
     if (!self) return nil;
-    _defaults = [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
+    _defaults = preferences ? preferences : [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
     [_defaults registerDefaults:@{ @"inputMode": @0,
         @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
         @"capturePath": @"", @"loop": @NO, @"style": @0, @"fps": @60,
@@ -74,6 +79,9 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     }
 }
 
+- (BOOL)hasActiveSource { return static_cast<bool>(_source); }
+- (NSUInteger)sourceCallbackCount { return _sourceCallbackCount; }
+
 - (void)setCapture:(std::shared_ptr<const fah::Capture>)capture {
     [_renderer setCapture:std::move(capture)];
     [self updateStatus];
@@ -106,6 +114,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
             _source = fah::makeSource(sourceOptions, [weakSelf](const fah::SourceEvent& event) {
                 FAHSaverView *view = weakSelf;
                 if (!view) return;
+                ++view->_sourceCallbackCount;
                 switch (event.kind) {
                     case fah::SourceEvent::Kind::Reset:
                         view->_liveCapture = std::make_shared<fah::Capture>();
