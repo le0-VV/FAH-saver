@@ -39,9 +39,17 @@ Meshes use a unit sphere and a unit-radius cylinder from y=0 to y=1. Triangle
 winding faces outward. Vertex stride is 24 bytes; instance stride is 80 bytes.
 Each instance contains a column-major 4x4 transform followed by an RGBA colour.
 Cylinder transforms align their y axis with the bond. Coincident endpoints do
-not produce a cylinder. The camera mean-centres coordinates. Its bounds include
-the full space-filling atom radius in every style, so changing style does not
-change the camera fit. Bond material is opaque grey with RGB 0.75.
+not produce a cylinder. If the topology has bonds, the camera frames every atom
+that participates in any bond, including every bonded component. This prevents
+isolated distant atoms from making the bonded structure too small. A topology
+without bonds frames all atoms.
+
+The framing centre is the mean position of those framing atoms. Its radius is
+the maximum of `distance(atom, centre) + atom.radius` over those atoms, using
+the full space-filling atom radius. Every atom and bond remains in the rendered scene, translated by the
+same centre; isolated atoms can lie outside the camera view. Coordinates and
+relative positions are unchanged. All styles use the same bounds, so changing
+style does not change the camera fit. Bond material is opaque grey with RGB 0.75.
 
 `viewProjection` uses `P * T(0,0,-distance) * Ry(angle)`, with a right-handed camera
 looking along -Z and +Y up. The field of view is 45 degrees and clip depth is 0..1.

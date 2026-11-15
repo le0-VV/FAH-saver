@@ -247,10 +247,21 @@ Scene makeScene(const Topology& topology, const Frame& frame, Style style) {
     if (topology.bonds.size() > maxBonds) invalid("Topology exceeds the supported bond count");
     if (style != Style::SpaceFilling && style != Style::BallAndStick && style != Style::Sticks)
         invalid("Unknown model style");
+    std::vector<bool> framingAtoms(frame.size(), topology.bonds.empty());
+    for (auto bond : topology.bonds) {
+        if (bond.a >= frame.size() || bond.b >= frame.size())
+            invalid("Bond index exceeds topology atom count");
+        framingAtoms[bond.a] = framingAtoms[bond.b] = true;
+    }
     double x = 0, y = 0, z = 0;
-    for (auto point : frame) { x += point.x; y += point.y; z += point.z; }
-    const Vec3 centre{static_cast<float>(x / frame.size()), static_cast<float>(y / frame.size()),
-                      static_cast<float>(z / frame.size())};
+    std::size_t framingCount = 0;
+    for (std::size_t i = 0; i < frame.size(); ++i)
+        if (framingAtoms[i]) {
+            x += frame[i].x; y += frame[i].y; z += frame[i].z;
+            ++framingCount;
+        }
+    const Vec3 centre{static_cast<float>(x / framingCount), static_cast<float>(y / framingCount),
+                      static_cast<float>(z / framingCount)};
     Scene result;
     result.radius = 0;
     result.atoms.reserve(frame.size());
@@ -263,15 +274,14 @@ Scene makeScene(const Topology& topology, const Frame& frame, Style style) {
             if (!std::isfinite(channel) || channel < 0 || channel > 1)
                 invalid("Atom colour must contain finite channels between 0 and 1");
         const auto position = subtract(frame[i], centre);
-        result.radius = std::max(result.radius, length(position) + atom.radius);
+        if (framingAtoms[i])
+            result.radius = std::max(result.radius, length(position) + atom.radius);
         const float radius = style == Style::Sticks ? .025f :
             style == Style::BallAndStick ? atom.radius / 3 : atom.radius;
         result.atoms.push_back(instance({radius, 0, 0}, {0, radius, 0}, {0, 0, radius},
                                          position, atom.colour));
     }
     for (auto bond : topology.bonds) {
-        if (bond.a >= frame.size() || bond.b >= frame.size())
-            invalid("Bond index exceeds topology atom count");
         if (style == Style::SpaceFilling) continue;
         const auto direction = subtract(frame[bond.b], frame[bond.a]);
         const auto distance = length(direction);

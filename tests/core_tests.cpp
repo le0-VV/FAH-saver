@@ -130,8 +130,44 @@ int main(int argc, char** argv) {
         close(ballStick.bonds[0].transform[13], -1);
         close(spheres.radius, 1.17f);
         close(spheres.radius, sticks.radius);
+        auto withOutlier = pair;
+        withOutlier.atoms.push_back(pair.atoms[0]);
+        const fah::Frame outlierFrame{{0, 0, 0}, {0, 2, 0}, {10000, -4000, 6000}};
+        for (auto style : {fah::Style::SpaceFilling, fah::Style::BallAndStick, fah::Style::Sticks}) {
+            const auto framed = fah::makeScene(withOutlier, outlierFrame, style);
+            check(framed.atoms.size() == 3, "Framing discarded an isolated atom");
+            close(framed.radius, spheres.radius);
+            close(framed.atoms[0].transform[13], -1);
+            close(framed.atoms[1].transform[13], 1);
+            close(framed.atoms[2].transform[12], 10000);
+            close(framed.atoms[2].transform[13], -4001);
+            close(framed.atoms[2].transform[14], 6000);
+            check(framed.bonds.size() == (style == fah::Style::SpaceFilling ? 0u : 1u),
+                  "Framing discarded a visible bond");
+        }
+        const auto components = fah::parseTopology(
+            R"({"atoms":[["C"],["O"],["C"],["O"],["C"]],"bonds":[[0,1],[2,3]]})");
+        const auto framedComponents = fah::makeScene(components,
+            {{-10, 0, 0}, {-8, 0, 0}, {8, 0, 0}, {10, 0, 0}, {5000, 5000, 5000}},
+            fah::Style::BallAndStick);
+        check(framedComponents.atoms.size() == 5 && framedComponents.bonds.size() == 2,
+              "Framing changed topology instance counts");
+        close(framedComponents.radius, 10.17f);
+        close(framedComponents.atoms[0].transform[12], -10);
+        close(framedComponents.atoms[3].transform[12], 10);
+        close(framedComponents.atoms[4].transform[12], 5000);
+        auto unbonded = pair;
+        unbonded.bonds.clear();
+        const auto unbondedScene = fah::makeScene(unbonded, {{0, 0, 0}, {20, 0, 0}},
+                                                 fah::Style::SpaceFilling);
+        close(unbondedScene.radius, 10.17f);
+        close(unbondedScene.atoms[0].transform[12], -10);
+        close(unbondedScene.atoms[1].transform[12], 10);
         check(fah::makeScene(pair, {{1, 1, 1}, {1, 1, 1}}, fah::Style::Sticks).bonds.empty(),
               "Coincident endpoints created a degenerate cylinder");
+        auto invalidBond = pair;
+        invalidBond.bonds[0].b = 2;
+        rejects([&] { fah::makeScene(invalidBond, line, fah::Style::SpaceFilling); });
         rejects([&] { fah::makeScene(pair, {{0, 0, 0}}, fah::Style::Sticks); });
         rejects([&] { fah::makeScene(pair, line, static_cast<fah::Style>(99)); });
         auto badCapture = capture;
