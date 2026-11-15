@@ -275,6 +275,8 @@ static NSDictionary *summary(const std::vector<double>& values) {
     [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:0];
     [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
     [encoder setRenderPipelineState:_proteinPipeline];
+    [encoder setFrontFacingWinding:MTLWindingCounterClockwise];
+    [encoder setCullMode:MTLCullModeBack];
     [encoder setDepthStencilState:_depthState];
     [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:2];
     if (_atomCount) {
