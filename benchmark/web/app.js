@@ -115,7 +115,7 @@
   }
 
   function initialiseGL() {
-    gl = canvas.getContext('webgl2', {alpha: false, antialias: true, depth: true, powerPreference: 'default'});
+    gl = canvas.getContext('webgl2', {alpha: false, antialias: false, depth: true, powerPreference: 'default'});
     if (!gl) throw new Error('WebGL 2 is unavailable');
     proteinProgram = program(vertexSource, fragmentSource);
     backgroundProgram = program(backgroundVertexSource, backgroundFragmentSource);
@@ -123,6 +123,7 @@
     backgroundUniform = {sky: gl.getUniformLocation(backgroundProgram, 'sky'), solid: gl.getUniformLocation(backgroundProgram, 'solid')};
     atomMesh = uploadMesh(sphereMesh()); bondMesh = uploadMesh(cylinderMesh());
     gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE); gl.depthFunc(gl.LESS);
+    gl.frontFace(gl.CCW); gl.cullFace(gl.BACK);
     canvas.addEventListener('webglcontextlost', event => {
       event.preventDefault(); cancelAnimationFrame(animation); animation = 0;
       reportError(new Error('WebGL context was lost. Reload before another trial.'));
@@ -161,11 +162,11 @@
       previousFrame = frame; previousStyle = style;
     }
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.disable(gl.DEPTH_TEST); gl.useProgram(backgroundProgram); gl.bindVertexArray(null);
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.useProgram(backgroundProgram); gl.bindVertexArray(null);
     gl.uniform1i(backgroundUniform.sky, settings.background === 'sky'); gl.uniform3fv(backgroundUniform.solid, settings.colour);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.enable(gl.DEPTH_TEST); gl.useProgram(proteinProgram);
-    const angle = -seconds / 5, c = Math.cos(angle), s = Math.sin(angle);
+    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.useProgram(proteinProgram);
+    const angle = seconds / 5, c = Math.cos(angle), s = Math.sin(angle);
     gl.uniformMatrix4fv(uniform.vp, false, viewProjection(angle, canvas.width / canvas.height, scene.radius));
     gl.uniformMatrix3fv(uniform.rotation, false, new Float32Array([c, 0, -s, 0, 1, 0, s, 0, c]));
     for (const mesh of [atomMesh, bondMesh]) if (mesh.count) {
@@ -186,6 +187,7 @@
   function finish(state = 'ok', error = null) {
     if (!metrics) return;
     const sample = metrics; metrics = null;
+    if (params.get('benchmark') === '1') { cancelAnimationFrame(animation); animation = 0; }
     const elapsed = Math.max(0, sample.lastDraw - sample.start);
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const result = {

@@ -201,6 +201,7 @@ int main(int argc, const char *argv[]) {
                         NSString *displayStatus = statusText ? statusText : renderer.lastError;
                         if (![statusLabel.stringValue isEqualToString:displayStatus])
                             statusLabel.stringValue = displayStatus ? displayStatus : @"";
+                        statusLabel.hidden = !displayStatus.length;
                         pumpUntil(std::min(began+seconds,CACurrentMediaTime()+.02));
                     }
                     if (renderer.lastError) { fatalError = renderer.lastError; break; }

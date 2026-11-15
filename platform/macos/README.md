@@ -28,7 +28,7 @@ Example commands, using paths from the parent build directory:
 ```
 
 Use `--style cycle` or `--style random` for timed style changes. The provisional
-style interval is 20 seconds; loop playback advances a snapshot every 0.1 seconds.
+style interval is 10 seconds; loop playback advances a snapshot every 0.1 seconds.
 The user frame-rate limit does not alter snapshot cadence. `--unit ID` selects a
 specific WU for a live source. The source emits an explicit error if selection is
 ambiguous. The harness waits up to 30 seconds for its first usable live snapshot.
