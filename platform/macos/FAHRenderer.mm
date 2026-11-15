@@ -151,7 +151,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     _dirty = true;
     _frame = 0;
     @synchronized(self) {
-        _lastError = (!_capture || _capture->frames.empty()) ? @"No protein snapshots available." : nil;
+        if (!_gpuErrors) _lastError = (!_capture || _capture->frames.empty()) ? @"No protein snapshots available." : nil;
     }
 }
 
@@ -224,6 +224,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
 - (id<MTLCommandBuffer>)renderToTexture:(id<MTLTexture>)texture time:(double)time
                             drawable:(id<CAMetalDrawable>)drawable {
     if (!_running || !texture) return nil;
+    @synchronized(self) { if (_gpuErrors) return nil; }
     const bool hasModel = _capture && !_capture->frames.empty();
     if (!hasModel && !_dirty) return nil;
     if (!hasModel) { _atomCount = _bondCount = 0; _scene.radius = 1; _dirty = false; }

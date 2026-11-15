@@ -41,6 +41,8 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     [self addSubview:_metalView];
     _status = [NSTextField wrappingLabelWithString:error.localizedDescription ? error.localizedDescription : @"Connecting to Folding@home…"];
     _status.textColor = NSColor.whiteColor;
+    _status.drawsBackground = YES;
+    _status.backgroundColor = [NSColor colorWithWhite:0 alpha:.75];
     _status.alignment = NSTextAlignmentCenter;
     _status.translatesAutoresizingMaskIntoConstraints = NO;
     [self addSubview:_status];

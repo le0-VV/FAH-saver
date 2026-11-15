@@ -180,6 +180,8 @@ int main(int argc, const char *argv[]) {
                 statusLabel = [NSTextField wrappingLabelWithString:@""];
                 statusLabel.frame = NSMakeRect(20,20,width/scale-40,45);
                 statusLabel.textColor = NSColor.whiteColor;
+                statusLabel.drawsBackground = YES;
+                statusLabel.backgroundColor = [NSColor colorWithWhite:0 alpha:.75];
                 [view addSubview:statusLabel];
                 [window center]; [window makeKeyAndOrderFront:nil];
                 [NSApp activateIgnoringOtherApps:YES];
