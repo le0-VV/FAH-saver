@@ -324,6 +324,13 @@ LRESULT CALLBACK windowProcedure(HWND window,UINT message,WPARAM wparam,LPARAM l
             if (app->renderer) app->renderer->resize();
             if (app->status) MoveWindow(app->status,24,24,std::max(1,int(LOWORD(lparam))-48),100,TRUE);
             app->redraw = true; return 0;
+        case WM_DISPLAYCHANGE:
+            if (app->fullscreen && !SetWindowPos(window,HWND_TOPMOST,
+                GetSystemMetrics(SM_XVIRTUALSCREEN),GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                SWP_NOACTIVATE | SWP_NOOWNERZORDER))
+                throw std::runtime_error("Cannot resize screensaver after a display change");
+            app->redraw = true; return 0;
         case WM_CTLCOLORSTATIC:
             SetTextColor(reinterpret_cast<HDC>(wparam),RGB(255,255,255));
             SetBkColor(reinterpret_cast<HDC>(wparam),RGB(0,0,0));
@@ -332,7 +339,9 @@ LRESULT CALLBACK windowProcedure(HWND window,UINT message,WPARAM wparam,LPARAM l
             if (!app->preview && (app->fullscreen || wparam == VK_ESCAPE)) DestroyWindow(window);
             return 0;
         case WM_LBUTTONDOWN: case WM_MBUTTONDOWN: case WM_RBUTTONDOWN:
-            if (app->fullscreen) DestroyWindow(window); return 0;
+        case WM_XBUTTONDOWN: case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
+            if (app->fullscreen) DestroyWindow(window);
+            return message == WM_XBUTTONDOWN ? TRUE : 0;
         case WM_MOUSEMOVE:
             if (app->fullscreen) {
                 POINT point; GetCursorPos(&point);

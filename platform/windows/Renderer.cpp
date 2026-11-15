@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -109,12 +110,12 @@ struct Renderer::Impl {
         if (!size) return;
         if (size > destination.capacity) {
             destroyBuffer(destination);
-            VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            VkBufferCreateInfo info{}; info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
             info.size = size; info.usage = usage; info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
             require(vkCreateBuffer(device, &info, nullptr, &destination.buffer), "Create buffer");
             VkMemoryRequirements requirements;
             vkGetBufferMemoryRequirements(device, destination.buffer, &requirements);
-            VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+            VkMemoryAllocateInfo allocation{}; allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
             allocation.allocationSize = requirements.size;
             // shortcut: host-visible geometry buffers; add device-local staging if measurements justify it.
             allocation.memoryTypeIndex = memoryType(requirements.memoryTypeBits,
@@ -131,14 +132,14 @@ struct Renderer::Impl {
 
     void initialise(HWND target) {
         window = target;
-        VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+        VkApplicationInfo application{}; application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         application.pApplicationName = "FAH Saver"; application.apiVersion = VK_API_VERSION_1_0;
         const char* instanceExtensions[]{VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
-        VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+        VkInstanceCreateInfo info{}; info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
         info.pApplicationInfo = &application;
         info.enabledExtensionCount = 2; info.ppEnabledExtensionNames = instanceExtensions;
         require(vkCreateInstance(&info, nullptr, &instance), "Create Vulkan instance");
-        VkWin32SurfaceCreateInfoKHR surfaceInfo{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+        VkWin32SurfaceCreateInfoKHR surfaceInfo{}; surfaceInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
         surfaceInfo.hinstance = GetModuleHandleW(nullptr); surfaceInfo.hwnd = window;
         require(vkCreateWin32SurfaceKHR(instance, &surfaceInfo, nullptr, &surface), "Create Win32 surface");
         std::uint32_t count = 0;
@@ -175,30 +176,30 @@ struct Renderer::Impl {
         if (!physical) throw std::runtime_error("No Vulkan adapter supports graphics and window presentation");
         vkGetPhysicalDeviceMemoryProperties(physical, &memory);
         const float priority = 1;
-        VkDeviceQueueCreateInfo queueInfo{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+        VkDeviceQueueCreateInfo queueInfo{}; queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         queueInfo.queueFamilyIndex = family; queueInfo.queueCount = 1; queueInfo.pQueuePriorities = &priority;
         const char* deviceExtensions[]{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-        VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+        VkDeviceCreateInfo deviceInfo{}; deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         deviceInfo.queueCreateInfoCount = 1; deviceInfo.pQueueCreateInfos = &queueInfo;
         deviceInfo.enabledExtensionCount = 1; deviceInfo.ppEnabledExtensionNames = deviceExtensions;
         require(vkCreateDevice(physical, &deviceInfo, nullptr, &device), "Create Vulkan device");
         vkGetDeviceQueue(device, family, 0, &queue);
-        VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        VkCommandPoolCreateInfo poolInfo{}; poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         poolInfo.queueFamilyIndex = family; poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         require(vkCreateCommandPool(device, &poolInfo, nullptr, &pool), "Create command pool");
-        VkCommandBufferAllocateInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo commandInfo{}; commandInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         commandInfo.commandPool = pool; commandInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; commandInfo.commandBufferCount = 1;
         require(vkAllocateCommandBuffers(device, &commandInfo, &command), "Allocate command buffer");
-        VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VkSemaphoreCreateInfo semaphoreInfo{}; semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         require(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &acquired), "Create acquisition semaphore");
-        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO}; fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        VkFenceCreateInfo fenceInfo{}; fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO; fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         require(vkCreateFence(device, &fenceInfo, nullptr, &fence), "Create submission fence");
         VkPushConstantRange range{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(Parameters)};
-        VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        VkPipelineLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.pushConstantRangeCount = 1; layoutInfo.pPushConstantRanges = &range;
         require(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout), "Create pipeline layout");
         if (timestampBits) {
-            VkQueryPoolCreateInfo queryInfo{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+            VkQueryPoolCreateInfo queryInfo{}; queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
             queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP; queryInfo.queryCount = 2;
             require(vkCreateQueryPool(device, &queryInfo, nullptr, &queries), "Create timestamp queries");
         }
@@ -216,7 +217,7 @@ struct Renderer::Impl {
         const auto vertexBytes = shaderBytes(background ? L"background.vert.spv" : L"model.vert.spv");
         const auto fragmentBytes = shaderBytes(background ? L"background.frag.spv" : L"model.frag.spv");
         VkShaderModule vertex = VK_NULL_HANDLE, fragment = VK_NULL_HANDLE;
-        VkShaderModuleCreateInfo module{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        VkShaderModuleCreateInfo module{}; module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         module.codeSize = vertexBytes.size() * 4; module.pCode = vertexBytes.data();
         require(vkCreateShaderModule(device, &module, nullptr, &vertex), "Create vertex shader");
         module.codeSize = fragmentBytes.size() * 4; module.pCode = fragmentBytes.data();
@@ -233,29 +234,31 @@ struct Renderer::Impl {
             {2,1,VK_FORMAT_R32G32B32A32_SFLOAT,0}, {3,1,VK_FORMAT_R32G32B32A32_SFLOAT,16},
             {4,1,VK_FORMAT_R32G32B32A32_SFLOAT,32}, {5,1,VK_FORMAT_R32G32B32A32_SFLOAT,48},
             {6,1,VK_FORMAT_R32G32B32A32_SFLOAT,64}};
-        VkPipelineVertexInputStateCreateInfo vertexInput{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        VkPipelineVertexInputStateCreateInfo vertexInput{}; vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
         if (!background) {
             vertexInput.vertexBindingDescriptionCount = 2; vertexInput.pVertexBindingDescriptions = bindings;
             vertexInput.vertexAttributeDescriptionCount = 7; vertexInput.pVertexAttributeDescriptions = attributes;
         }
-        VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        VkPipelineInputAssemblyStateCreateInfo assembly{}; assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
         assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-        VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        VkPipelineViewportStateCreateInfo viewport{}; viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
         viewport.viewportCount = 1; viewport.scissorCount = 1;
-        VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
-        raster.polygonMode = VK_POLYGON_MODE_FILL; raster.cullMode = VK_CULL_MODE_NONE; raster.lineWidth = 1;
-        VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        VkPipelineRasterizationStateCreateInfo raster{}; raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        raster.polygonMode = VK_POLYGON_MODE_FILL;
+        raster.cullMode = background ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+        raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; raster.lineWidth = 1;
+        VkPipelineMultisampleStateCreateInfo multisample{}; multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-        VkPipelineDepthStencilStateCreateInfo depthState{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        VkPipelineDepthStencilStateCreateInfo depthState{}; depthState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
         depthState.depthTestEnable = !background; depthState.depthWriteEnable = !background; depthState.depthCompareOp = VK_COMPARE_OP_LESS;
         VkPipelineColorBlendAttachmentState attachment{};
         attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        VkPipelineColorBlendStateCreateInfo blend{}; blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
         blend.attachmentCount = 1; blend.pAttachments = &attachment;
         const VkDynamicState states[]{VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
-        VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+        VkPipelineDynamicStateCreateInfo dynamic{}; dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
         dynamic.dynamicStateCount = 2; dynamic.pDynamicStates = states;
-        VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        VkGraphicsPipelineCreateInfo info{}; info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
         info.stageCount = 2; info.pStages = stages; info.pVertexInputState = &vertexInput;
         info.pInputAssemblyState = &assembly; info.pViewportState = &viewport; info.pRasterizationState = &raster;
         info.pMultisampleState = &multisample; info.pDepthStencilState = &depthState; info.pColorBlendState = &blend;
@@ -307,7 +310,7 @@ struct Renderer::Impl {
         }
         count = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount) count = std::min(count, capabilities.maxImageCount);
-        VkSwapchainCreateInfoKHR info{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+        VkSwapchainCreateInfoKHR info{}; info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         info.surface = surface; info.minImageCount = count; info.imageFormat = format.format; info.imageColorSpace = format.colorSpace;
         info.imageExtent = extent; info.imageArrayLayers = 1; info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
         info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; info.preTransform = capabilities.currentTransform;
@@ -319,12 +322,12 @@ struct Renderer::Impl {
         std::vector<VkImage> images(count);
         require(vkGetSwapchainImagesKHR(device, swapchain, &count, images.data()), "Read swapchain images");
         for (auto image : images) {
-            VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+            VkImageViewCreateInfo view{}; view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             view.image = image; view.viewType = VK_IMAGE_VIEW_TYPE_2D; view.format = colourFormat;
             view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; view.subresourceRange.levelCount = 1; view.subresourceRange.layerCount = 1;
             VkImageView handle = VK_NULL_HANDLE;
             require(vkCreateImageView(device, &view, nullptr, &handle), "Create colour image view"); views.push_back(handle);
-            VkSemaphoreCreateInfo semaphoreInfo{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            VkSemaphoreCreateInfo semaphoreInfo{}; semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
             VkSemaphore semaphore = VK_NULL_HANDLE;
             require(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore), "Create presentation semaphore"); finished.push_back(semaphore);
         }
@@ -332,17 +335,17 @@ struct Renderer::Impl {
         vkGetPhysicalDeviceFormatProperties(physical, VK_FORMAT_D32_SFLOAT, &depthProperties);
         if (!(depthProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
             throw std::runtime_error("Vulkan D32 depth attachments are unavailable");
-        VkImageCreateInfo depthInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo depthInfo{}; depthInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         depthInfo.imageType = VK_IMAGE_TYPE_2D; depthInfo.format = VK_FORMAT_D32_SFLOAT;
         depthInfo.extent = {extent.width, extent.height,1}; depthInfo.mipLevels = 1; depthInfo.arrayLayers = 1;
         depthInfo.samples = VK_SAMPLE_COUNT_1_BIT; depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL; depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         require(vkCreateImage(device, &depthInfo, nullptr, &depth), "Create depth image");
         VkMemoryRequirements requirements; vkGetImageMemoryRequirements(device, depth, &requirements);
-        VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        VkMemoryAllocateInfo allocation{}; allocation.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocation.allocationSize = requirements.size; allocation.memoryTypeIndex = memoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         require(vkAllocateMemory(device, &allocation, nullptr, &depthMemory), "Allocate depth memory");
         require(vkBindImageMemory(device, depth, depthMemory, 0), "Bind depth image");
-        VkImageViewCreateInfo depthViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo depthViewInfo{}; depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         depthViewInfo.image = depth; depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D; depthViewInfo.format = VK_FORMAT_D32_SFLOAT;
         depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         depthViewInfo.subresourceRange.levelCount = 1; depthViewInfo.subresourceRange.layerCount = 1;
@@ -360,14 +363,14 @@ struct Renderer::Impl {
         VkSubpassDependency dependency{}; dependency.srcSubpass = VK_SUBPASS_EXTERNAL; dependency.dstSubpass = 0;
         dependency.srcStageMask = dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        VkRenderPassCreateInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        VkRenderPassCreateInfo pass{}; pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         pass.attachmentCount = 2; pass.pAttachments = attachments; pass.subpassCount = 1; pass.pSubpasses = &subpass;
         pass.dependencyCount = 1; pass.pDependencies = &dependency;
         require(vkCreateRenderPass(device, &pass, nullptr, &renderPass), "Create render pass");
         modelPipeline = pipeline(false); backgroundPipeline = pipeline(true);
         for (auto view : views) {
             VkImageView attachmentsForFrame[]{view,depthView};
-            VkFramebufferCreateInfo framebufferInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+            VkFramebufferCreateInfo framebufferInfo{}; framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = renderPass; framebufferInfo.attachmentCount = 2; framebufferInfo.pAttachments = attachmentsForFrame;
             framebufferInfo.width = extent.width; framebufferInfo.height = extent.height; framebufferInfo.layers = 1;
             VkFramebuffer framebuffer = VK_NULL_HANDLE;
@@ -407,11 +410,11 @@ struct Renderer::Impl {
         if (acquire != VK_SUBOPTIMAL_KHR) require(acquire, "Acquire image");
         const auto start = std::chrono::steady_clock::now();
         require(vkResetCommandBuffer(command,0), "Reset command buffer");
-        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        VkCommandBufferBeginInfo begin{}; begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         require(vkBeginCommandBuffer(command,&begin), "Begin command buffer");
         if (queries) { vkCmdResetQueryPool(command,queries,0,2); vkCmdWriteTimestamp(command,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries,0); }
         VkClearValue clears[2]{}; clears[0].color = {{0,0,0,1}}; clears[1].depthStencil = {1,0};
-        VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        VkRenderPassBeginInfo pass{}; pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         pass.renderPass = renderPass; pass.framebuffer = framebuffers[image]; pass.renderArea.extent = extent;
         pass.clearValueCount = 2; pass.pClearValues = clears;
         vkCmdBeginRenderPass(command,&pass,VK_SUBPASS_CONTENTS_INLINE);
@@ -419,7 +422,7 @@ struct Renderer::Impl {
         const VkRect2D scissor{{0,0},extent};
         vkCmdSetViewport(command,0,1,&viewport); vkCmdSetScissor(command,0,1,&scissor);
         Parameters parameters{fah::viewProjection(angle,float(extent.width)/extent.height,radius),
-            {colour[0],colour[1],colour[2],1},{sky ? 1.f : 0.f,0,0,0}};
+            {colour[0],colour[1],colour[2],1},{sky ? 1.f : 0.f,std::cos(angle),std::sin(angle),0}};
         vkCmdPushConstants(command,layout,VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(parameters),&parameters);
         vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,backgroundPipeline); vkCmdDraw(command,3,1,0,0);
         vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,modelPipeline); geometry(atoms); geometry(bonds);
@@ -427,14 +430,14 @@ struct Renderer::Impl {
         if (queries) vkCmdWriteTimestamp(command,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries,1);
         require(vkEndCommandBuffer(command), "End command buffer");
         const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo submit{}; submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.waitSemaphoreCount = 1; submit.pWaitSemaphores = &acquired; submit.pWaitDstStageMask = &waitStage;
         submit.commandBufferCount = 1; submit.pCommandBuffers = &command;
         submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &finished[image];
         require(vkResetFences(device,1,&fence), "Reset submission fence");
         require(vkQueueSubmit(queue,1,&submit,fence), "Submit frame");
         queryWritten = bool(queries);
-        VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+        VkPresentInfoKHR present{}; present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         present.waitSemaphoreCount = 1; present.pWaitSemaphores = &finished[image];
         present.swapchainCount = 1; present.pSwapchains = &swapchain; present.pImageIndices = &image;
         const auto result = vkQueuePresentKHR(queue,&present);

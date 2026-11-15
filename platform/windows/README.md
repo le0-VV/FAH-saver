@@ -44,6 +44,7 @@ Native screensaver entry points:
 
 The initial full-screen host uses one surface across the virtual desktop. Mixed
 refresh rates and independent per-monitor scenes need further host work.
+Display changes update that surface to the current virtual-desktop bounds.
 
 Rendering reuses shared mesh buffers. Instance buffers change only when the
 displayed snapshot or style changes. A waitable frame timer caps rendering
@@ -58,10 +59,11 @@ one in-flight frame. Record adapter and actual display configuration alongside
 each comparison result.
 
 Local checks compile the four GLSL shaders to SPIR-V, validate their output and
-run the portable option validation tests. The complete host, core and WinHTTP
-source also cross-compile to an x64 Windows executable using Zig and its bundled
-MinGW libraries. A native Windows SDK build and actual `.scr` lifecycle tests
-must still run on Windows before this host is considered verified.
+run portable option and projection/winding tests. The complete host, core and
+WinHTTP source also cross-compile through CMake/Ninja to an x64 Windows GUI
+executable using Zig and its bundled MinGW libraries. A native Windows SDK build,
+actual culling image comparison and `.scr` lifecycle tests must still run on
+Windows before this host is considered verified.
 
 Implementation references:
 

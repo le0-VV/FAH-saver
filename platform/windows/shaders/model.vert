@@ -9,6 +9,8 @@ layout(location=1) out vec3 vertexColour;
 void main() {
     gl_Position = p.vp * model * vec4(position,1);
     gl_Position.y = -gl_Position.y;
-    vertexNormal = transpose(inverse(mat3(model))) * normal;
+    vec3 n = normalize(mat3(model) * normal);
+    float c = p.options.y, s = p.options.z;
+    vertexNormal = vec3(c*n.x+s*n.z,n.y,-s*n.x+c*n.z);
     vertexColour = colour.rgb;
 }
