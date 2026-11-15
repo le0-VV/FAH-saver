@@ -19,9 +19,9 @@ endif()
 
 set(FAH_SHADERS)
 foreach(shader IN ITEMS model.vert model.frag background.vert background.frag)
-    set(output "${CMAKE_CURRENT_BINARY_DIR}/shaders/${shader}.spv")
+    set(output "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders/${shader}.spv")
     add_custom_command(OUTPUT "${output}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders"
         COMMAND "${FAH_GLSLANG_VALIDATOR}" -V "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}" -o "${output}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${shader}" VERBATIM)
     list(APPEND FAH_SHADERS "${output}")
@@ -29,7 +29,7 @@ endforeach()
 add_custom_target(fah_windows_shaders DEPENDS ${FAH_SHADERS})
 add_dependencies(fah_saver_windows fah_windows_shaders)
 add_custom_command(TARGET fah_saver_windows POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:fah_saver_windows>/shaders"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders" "$<TARGET_FILE_DIR:fah_saver_windows>/shaders"
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:fah_saver_windows>" "$<TARGET_FILE_DIR:fah_saver_windows>/fah-preview.exe")
 
 if(BUILD_TESTING)

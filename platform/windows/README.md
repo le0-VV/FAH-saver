@@ -57,9 +57,11 @@ GPU memory and power are unmeasured. The renderer uses FIFO presentation and
 one in-flight frame. Record adapter and actual display configuration alongside
 each comparison result.
 
-Local checks compile the four GLSL shaders to SPIR-V and run the portable option
-validation tests. Native Windows compilation and actual `.scr` lifecycle tests
-must run on Windows before this host is considered verified.
+Local checks compile the four GLSL shaders to SPIR-V, validate their output and
+run the portable option validation tests. The complete host, core and WinHTTP
+source also cross-compile to an x64 Windows executable using Zig and its bundled
+MinGW libraries. A native Windows SDK build and actual `.scr` lifecycle tests
+must still run on Windows before this host is considered verified.
 
 Implementation references:
 

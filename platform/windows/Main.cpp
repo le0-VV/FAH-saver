@@ -6,6 +6,7 @@
 #include <psapi.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cwctype>
@@ -193,6 +194,7 @@ struct App {
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<fah::Source> source;
     bool fullscreen = false,preview = false,redraw = true,failed = false;
+    std::atomic<bool> deliveryFailed{false};
     POINT initialMouse{};
     std::uint64_t revision = 0,lastRevision = UINT64_MAX,frameCount = 0,gpuCount = 0;
     std::size_t retainedBytes = 0;
@@ -215,9 +217,10 @@ struct App {
         if (!options.capture.empty()) { capture = fah::readCapture(options.capture); ++revision; message(""); }
         else if (!options.source.empty()) {
             const HWND target = window;
-            source = fah::makeSource({options.source,options.unit},[target](fah::SourceEvent event) {
+            source = fah::makeSource({options.source,options.unit},[this,target](fah::SourceEvent event) {
                 auto value = std::make_unique<fah::SourceEvent>(std::move(event));
                 if (PostMessageW(target,sourceMessage,0,reinterpret_cast<LPARAM>(value.get()))) value.release();
+                else deliveryFailed = true;
             });
             message("Connecting to FAH…"); source->start();
         } else message("Set a live source URL or capture file in Screen Saver Settings → Settings.");
@@ -249,6 +252,7 @@ struct App {
         }
     }
     void render() {
+        if (deliveryFailed) throw std::runtime_error("Cannot queue FAH updates for the screensaver window");
         const double elapsed = std::chrono::duration<double>(Clock::now()-started).count();
         if (options.seconds > 0 && elapsed >= options.seconds) { PostMessageW(window,WM_CLOSE,0,0); return; }
         if (IsIconic(window)) return;
