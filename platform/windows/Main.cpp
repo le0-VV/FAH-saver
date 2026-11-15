@@ -394,6 +394,7 @@ int run(const std::vector<std::wstring>& arguments) {
         std::vector<std::string> options;
         for (const auto& argument : arguments) options.push_back(utf8(argument));
         app.options = parseOptions(options,app.options);
+        app.fullscreen = app.options.fullscreen;
     }
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSW windowClass{}; windowClass.lpfnWndProc = windowProcedure;

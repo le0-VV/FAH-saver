@@ -35,6 +35,11 @@ unavailable; the host displays connection or configuration status instead.
 Live loop retention fails explicitly at 128 MiB of coordinates or 100,000
 snapshots. Latest mode retains one snapshot. A disconnection clears the model.
 
+`--fullscreen true` runs the harness through the same full-screen host and input
+handlers as `/s`. It defaults to false and is not saved in preferences. Use
+`--seconds 5` for a bounded full-screen smoke test. Explicit durations must be
+positive and no greater than 3600 seconds; omitting duration runs until exit.
+
 Native screensaver entry points:
 
 - `/s` runs full-screen and exits on keyboard or mouse activity.

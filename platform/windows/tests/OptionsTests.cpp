@@ -19,6 +19,9 @@ int main() {
         "--background", "solid", "--colour", "#ff0080"});
     check(options.fps == 60 && options.seconds == 2.5 && options.style == 5);
     check(options.loop && !options.sky && options.colour[0] == 1 && options.colour[1] == 0);
+    check(!options.fullscreen);
+    check(parseOptions({"--fullscreen", "true", "--seconds", "3600"}).fullscreen);
+    check(!parseOptions({"--fullscreen", "false"}).fullscreen);
     check(parseOptions({"--source", "ws://localhost:7396/api/websocket"}).fps == 60);
     Options saved; saved.source = "ws://localhost:7396/api/websocket";
     check(parseOptions({"--capture", "file.json"},saved).source.empty());
@@ -30,6 +33,11 @@ int main() {
     rejects([] { parseOptions({"--seconds", "nan"}); });
     rejects([] { parseOptions({"--seconds", "-1"}); });
     rejects([] { parseOptions({"--seconds", "1x"}); });
+    rejects([] { parseOptions({"--seconds", "3600.1"}); });
+    rejects([] { parseOptions({"--seconds", "1e20"}); });
+    rejects([] { parseOptions({"--fullscreen", "1"}); });
+    rejects([] { parseOptions({"--fullscreen", "TRUE"}); });
+    rejects([] { parseOptions({"--fullscreen"}); });
     rejects([] { parseOptions({"--style", "0"}); });
     rejects([] { parseOptions({"--colour", "#abcd"}); });
     rejects([] { parseOptions({"--playback", "other"}); });

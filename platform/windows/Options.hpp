@@ -19,6 +19,7 @@ struct Options {
     int style = 1; // 4 cycles styles; 5 selects them at random.
     bool loop = false;
     bool sky = true;
+    bool fullscreen = false;
     float colour[3] = {.02f, .025f, .035f};
 };
 
@@ -61,8 +62,8 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
         else if (key == "--seconds") {
             std::size_t end = 0;
             options.seconds = std::stod(value, &end);
-            if (end != value.size() || !std::isfinite(options.seconds) || options.seconds <= 0)
-                throw std::runtime_error("Duration must be a positive finite number");
+            if (end != value.size() || !std::isfinite(options.seconds) || options.seconds <= 0 || options.seconds > 3600)
+                throw std::runtime_error("Duration must be a positive finite number no greater than 3600 seconds");
         } else if (key == "--style") {
             if (value == "cycle") options.style = 4;
             else if (value == "random") options.style = 5;
@@ -76,6 +77,11 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
                 throw std::runtime_error("Background must be sky or solid");
             options.sky = value == "sky";
         } else if (key == "--colour") colour(options, value);
+        else if (key == "--fullscreen") {
+            if (value != "true" && value != "false")
+                throw std::runtime_error("Fullscreen must be true or false");
+            options.fullscreen = value == "true";
+        }
         else throw std::runtime_error("Unknown option: " + key);
     }
     if ((selectedCapture && selectedSource) || (!options.source.empty() && !options.capture.empty()))
