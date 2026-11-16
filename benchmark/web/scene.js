@@ -116,11 +116,14 @@ function styleAt(mode, seconds) {
   throw new Error('Style must be 1, 2, 3, cycle or random');
 }
 
+// A queued rAF timestamp can precede a start established within that refresh.
+function elapsedSeconds(now, epoch) { return Math.max(0, (now - epoch) / 1000); }
+
 function nextFrameDeadline(now, due, fps) {
   const interval = 1000 / fps;
   if (now + Math.min(1.5, interval * .1) < due) return null;
   return due + (Math.floor(Math.max(0, now - due) / interval) + 1) * interval;
 }
 
-globalThis.FAHScene = {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, nextFrameDeadline};
+globalThis.FAHScene = {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, elapsedSeconds, nextFrameDeadline};
 })();

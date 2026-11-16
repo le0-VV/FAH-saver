@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const {limits, parseCapture, validateCapture, readCaptureURL} = globalThis.FAHCapture;
-  const {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, nextFrameDeadline} = globalThis.FAHScene;
+  const {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, elapsedSeconds, nextFrameDeadline} = globalThis.FAHScene;
   const {createGpuTimer} = globalThis.FAHGpuTimer;
   const canvas = document.getElementById('canvas');
   const status = document.getElementById('status');
@@ -155,7 +155,7 @@
 
   function draw(now, gpuTimer) {
     resize();
-    const seconds = (now - epoch) / 1000;
+    const seconds = elapsedSeconds(now, epoch);
     const frame = settings.playback === 'latest' ? capture.frames.length - 1 : Math.floor(seconds * 10) % capture.frames.length;
     const style = styleAt(settings.style, seconds);
     if (frame !== previousFrame || style !== previousStyle) {

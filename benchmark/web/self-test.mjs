@@ -4,7 +4,7 @@ import './scene.js';
 import './gpu-timer-test.mjs';
 
 const {parseCapture, validateCapture, readCaptureURL, limits} = globalThis.FAHCapture;
-const {makeScene, sphereMesh, cylinderMesh, viewProjection, styleAt, nextFrameDeadline} = globalThis.FAHScene;
+const {makeScene, sphereMesh, cylinderMesh, viewProjection, styleAt, elapsedSeconds, nextFrameDeadline} = globalThis.FAHScene;
 
 // Synthetic geometry checks; this fixture is never loaded by the renderer itself.
 const fixture = {
@@ -81,6 +81,14 @@ for (const [fps, expectedDraws] of [[60, 121], [30, 61], [1, 3]]) {
   assert.equal(draws, expectedDraws, `${fps} fps pacing with millisecond timestamps`);
 }
 assert.ok(nextFrameDeadline(1000, 0, 60) > 1000, 'Late callbacks skip overdue targets');
+const firstTimestamp = 1000, newEpoch = 1000.75;
+assert.notEqual(nextFrameDeadline(firstTimestamp, newEpoch, 60), null, 'Quantised first callback can meet the tolerance');
+const firstSeconds = elapsedSeconds(firstTimestamp, newEpoch);
+const firstLoopFrame = Math.floor(firstSeconds * 10) % capture.frames.length;
+assert.equal(firstLoopFrame, 0, 'A first callback before the new epoch must select frame zero');
+assert.doesNotThrow(() => makeScene(capture, firstLoopFrame, styleAt('cycle', firstSeconds)));
+assert.equal(elapsedSeconds(newEpoch, newEpoch), 0);
+assert.equal(elapsedSeconds(newEpoch + 10000, newEpoch), 10);
 
 const savedFetch = globalThis.fetch;
 try {
