@@ -26,6 +26,12 @@ struct Options {
     float colour[3] = {.02f, .025f, .035f};
 };
 
+inline Options liveScreensaverOptions(Options options) {
+    options.capture.clear();
+    if (options.source.empty()) options.source = "ws://127.0.0.1:7396/api/websocket";
+    return options;
+}
+
 inline unsigned number(std::string_view value, unsigned minimum, unsigned maximum) {
     unsigned result = 0;
     const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);

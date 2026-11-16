@@ -1,7 +1,8 @@
 #include "Options.hpp"
 #include "Renderer.hpp"
 #include <fah/Source.hpp>
-#include <commdlg.h>
+#include <fah/LiveModel.hpp>
+#include <fah/SnapshotCache.hpp>
 #include <shellapi.h>
 #include <psapi.h>
 
@@ -17,6 +18,7 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 using namespace fah::windows;
@@ -72,18 +74,18 @@ std::string intervalText(double interval) {
 Options preferences() {
     std::vector<std::string> arguments;
     const std::pair<const wchar_t*,const char*> entries[]{
-        {L"Capture","--capture"},{L"Source","--source"},{L"Unit","--unit"},{L"FPS","--fps"},
+        {L"Source","--source"},{L"Unit","--unit"},{L"FPS","--fps"},
         {L"Style","--style"},{L"Playback","--playback"},{L"SnapshotInterval","--snapshot-interval"},
         {L"Background","--background"},{L"Colour","--colour"}};
     for (const auto& entry : entries) {
         auto value = setting(entry.first);
         if (!value.empty()) { arguments.emplace_back(entry.second); arguments.push_back(std::move(value)); }
     }
-    return parseOptions(arguments);
+    return liveScreensaverOptions(parseOptions(arguments));
 }
 
-enum Control { sourceControl=100,captureControl,unitControl,fpsControl,styleControl,playbackControl,
-    backgroundControl,colourControl,browseControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits };
+enum Control { sourceControl=100,unitControl,fpsControl,styleControl,playbackControl,
+    backgroundControl,colourControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits };
 struct Configuration { Options options; std::string error; };
 std::string controlText(HWND dialog,int identifier) {
     HWND control = GetDlgItem(dialog,identifier);
@@ -114,46 +116,33 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
     try {
         if (message == WM_INITDIALOG) {
             state = reinterpret_cast<Configuration*>(lparam); SetWindowLongPtrW(dialog,DWLP_USER,lparam);
-            SetWindowPos(dialog,nullptr,0,0,590,516,SWP_NOMOVE | SWP_NOZORDER);
+            SetWindowPos(dialog,nullptr,0,0,590,442,SWP_NOMOVE | SWP_NOZORDER);
             const auto& options = state->options;
             const auto label = [&](const wchar_t* text,int y) { control(dialog,L"STATIC",text,0,16,y+4,150,24,0); };
             label(L"Live source URL",18); control(dialog,L"EDIT",wide(options.source).c_str(),sourceControl,170,18,370,24,WS_TABSTOP | ES_AUTOHSCROLL);
             label(L"WU ID (optional)",54); control(dialog,L"EDIT",wide(options.unit).c_str(),unitControl,170,54,370,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            label(L"Capture file",90); control(dialog,L"EDIT",wide(options.capture).c_str(),captureControl,170,90,290,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            control(dialog,L"BUTTON",L"Browse…",browseControl,466,90,74,24,WS_TABSTOP | BS_PUSHBUTTON);
-            control(dialog,L"STATIC",L"Use either a live source URL or a recorded capture file.",0,170,120,370,32,0);
-            label(L"Frame-rate limit",164); control(dialog,L"EDIT",wide(std::to_string(options.fps)).c_str(),fpsControl,170,164,90,24,WS_TABSTOP | ES_NUMBER);
-            control(dialog,L"STATIC",L"fps (1–240; target 60)",0,272,168,260,24,0);
-            label(L"Protein snapshots",200); combo(dialog,playbackControl,200,{L"Latest snapshot",L"Loop available snapshots"},options.loop ? 1 : 0);
-            control(dialog,L"STATIC",L"Snapshot interval",snapshotIntervalLabel,16,240,150,24,0);
-            control(dialog,L"EDIT",wide(intervalText(options.snapshotInterval)).c_str(),snapshotIntervalControl,170,236,90,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            control(dialog,L"STATIC",L"seconds (0.05–60)",snapshotIntervalUnits,272,240,260,24,0);
+            label(L"Frame-rate limit",90); control(dialog,L"EDIT",wide(std::to_string(options.fps)).c_str(),fpsControl,170,90,90,24,WS_TABSTOP | ES_NUMBER);
+            control(dialog,L"STATIC",L"fps (1–240; target 60)",0,272,94,260,24,0);
+            label(L"Protein snapshots",126); combo(dialog,playbackControl,126,{L"Latest snapshot",L"Loop available snapshots"},options.loop ? 1 : 0);
+            control(dialog,L"STATIC",L"Snapshot interval",snapshotIntervalLabel,16,166,150,24,0);
+            control(dialog,L"EDIT",wide(intervalText(options.snapshotInterval)).c_str(),snapshotIntervalControl,170,162,90,24,WS_TABSTOP | ES_AUTOHSCROLL);
+            control(dialog,L"STATIC",L"seconds (0.05–60)",snapshotIntervalUnits,272,166,260,24,0);
             updateSnapshotIntervalControls(dialog);
-            label(L"Model style",272); combo(dialog,styleControl,272,{L"Space-filling",L"Ball-and-stick",L"Sticks",L"Cycle all three",L"Random"},options.style-1);
-            label(L"Background",308); combo(dialog,backgroundControl,308,{L"Light sky and grid",L"Dark sky and grid",L"Solid colour"},options.sky ? (options.darkSky ? 1 : 0) : 2);
-            label(L"Solid colour (RGB)",344); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,344,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,374,370,24,0);
-            control(dialog,L"STATIC",wide("Version " FAH_SAVER_VERSION).c_str(),0,16,434,300,24,0);
-            control(dialog,L"BUTTON",L"Save",IDOK,364,428,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
-            control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,428,82,28,WS_TABSTOP | BS_PUSHBUTTON);
+            label(L"Model style",198); combo(dialog,styleControl,198,{L"Space-filling",L"Ball-and-stick",L"Sticks",L"Cycle all three",L"Random"},options.style-1);
+            label(L"Background",234); combo(dialog,backgroundControl,234,{L"Light sky and grid",L"Dark sky and grid",L"Solid colour"},options.sky ? (options.darkSky ? 1 : 0) : 2);
+            label(L"Solid colour (RGB)",270); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,270,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
+            control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,300,370,24,0);
+            control(dialog,L"STATIC",wide("Version " FAH_SAVER_VERSION).c_str(),0,16,360,300,24,0);
+            control(dialog,L"BUTTON",L"Save",IDOK,364,354,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
+            control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,354,82,28,WS_TABSTOP | BS_PUSHBUTTON);
             return TRUE;
         }
         if (message == WM_COMMAND && LOWORD(wparam) == playbackControl && HIWORD(wparam) == CBN_SELCHANGE) {
             updateSnapshotIntervalControls(dialog); return TRUE;
         }
-        if (message == WM_COMMAND && LOWORD(wparam) == browseControl) {
-            wchar_t path[32768]{};
-            OPENFILENAMEW file{}; file.lStructSize = sizeof(file); file.hwndOwner = dialog;
-            file.lpstrFile = path; file.nMaxFile = 32768;
-            file.lpstrFilter = L"Protein captures (*.json)\0*.json\0All files\0*.*\0";
-            file.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-            if (GetOpenFileNameW(&file)) { SetDlgItemTextW(dialog,captureControl,path); SetDlgItemTextW(dialog,sourceControl,L""); }
-            else if (CommDlgExtendedError()) throw std::runtime_error("Cannot open file selection dialog");
-            return TRUE;
-        }
         if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
-            const auto source = controlText(dialog,sourceControl), capture = controlText(dialog,captureControl);
-            if (source.empty() && capture.empty()) throw std::runtime_error("Set a live source URL or select a capture file");
+            const auto source = controlText(dialog,sourceControl);
+            if (source.empty()) throw std::runtime_error("Set a live source URL");
             const int style = int(SendDlgItemMessageW(dialog,styleControl,CB_GETCURSEL,0,0))+1;
             const std::string styleName = style == 4 ? "cycle" : style == 5 ? "random" : std::to_string(style);
             const auto playback = SendDlgItemMessageW(dialog,playbackControl,CB_GETCURSEL,0,0);
@@ -166,13 +155,12 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
                 "--playback",loop ? "loop" : "latest","--snapshot-interval",
                 loop ? controlText(dialog,snapshotIntervalControl) : intervalText(state->options.snapshotInterval),
                 "--background",backgroundName,"--colour",controlText(dialog,colourControl)};
-            if (!source.empty()) { arguments.emplace_back("--source"); arguments.push_back(source); }
-            if (!capture.empty()) { arguments.emplace_back("--capture"); arguments.push_back(capture); }
+            arguments.emplace_back("--source"); arguments.push_back(source);
             arguments.emplace_back("--unit"); arguments.push_back(controlText(dialog,unitControl));
             state->options = parseOptions(arguments);
             if (!source.empty() && source.rfind("ws://",0) != 0 && source.rfind("wss://",0) != 0)
                 throw std::runtime_error("Source URL must begin with ws:// or wss://");
-            store(L"Capture",capture); store(L"Source",source); store(L"Unit",state->options.unit);
+            store(L"Source",source); store(L"Unit",state->options.unit);
             store(L"FPS",std::to_string(state->options.fps)); store(L"Style",styleName);
             store(L"Playback",loop ? "loop" : "latest");
             store(L"SnapshotInterval",intervalText(state->options.snapshotInterval)); store(L"Background",backgroundName);
@@ -184,8 +172,7 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
     return FALSE;
 }
 void configuration(HWND owner,Options options) {
-    if (options.source.empty() && options.capture.empty())
-        options.source = "ws://127.0.0.1:7396/api/websocket";
+    options = liveScreensaverOptions(std::move(options));
     struct Template { DLGTEMPLATE dialog; WORD menu; WORD windowClass; wchar_t title[10]; } layout{};
     layout.dialog.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_CENTER;
     layout.dialog.cx = 340; layout.dialog.cy = 240;
@@ -219,10 +206,26 @@ std::string escaped(const std::string& text) {
     return result;
 }
 
+std::filesystem::path snapshotCachePath() {
+    const DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA",nullptr,0);
+    if (!required) throw std::runtime_error("Cannot locate LocalAppData for the model cache");
+    std::wstring directory(required,L'\0');
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA",directory.data(),required);
+    if (!length || length >= required) throw std::runtime_error("Cannot read LocalAppData for the model cache");
+    directory.resize(length);
+    return std::filesystem::path(directory) / L"FAHSaver" / L"latest-model.cache";
+}
+void cacheDiagnostic(const std::string& text) {
+    OutputDebugStringA(("FAHSaver cache: "+text+"\n").c_str());
+}
+
 struct App {
     HWND window = nullptr,status = nullptr;
     Options options;
     fah::Capture capture;
+    fah::LiveModel liveModel;
+    std::unique_ptr<fah::SnapshotCache> cache;
+    std::thread cacheDrain;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<fah::Source> source;
     bool fullscreen = false,preview = false,redraw = true,failed = false;
@@ -232,7 +235,6 @@ struct App {
     std::uint64_t revision = 0,lastRevision = UINT64_MAX,frameCount = 0,gpuCount = 0;
     std::uint64_t pumpIterations = 0,messagesDispatched = 0,renderCalls = 0,timerWakes = 0,inputQueueWakes = 0;
     PhaseTiming sceneBuildUpload,fenceQueryWait,acquire,recordSubmit,present;
-    std::size_t retainedBytes = 0;
     unsigned drawableWidth = 0,drawableHeight = 0;
     std::size_t lastFrame = SIZE_MAX;
     int lastStyle = 0,randomStyle = 1;
@@ -247,8 +249,36 @@ struct App {
     std::string failure;
     std::string adapterName;
 
+    ~App() { if (cacheDrain.joinable()) cacheDrain.join(); }
+
+    const fah::Capture* displayedCapture() const {
+        return options.capture.empty() ? liveModel.capture().get() : &capture;
+    }
+    bool hasModel() const {
+        const auto* value = displayedCapture();
+        return value && !value->frames.empty();
+    }
+
     void message(const std::string& text) {
         SetWindowTextW(status,wide(text).c_str()); ShowWindow(status,text.empty() ? SW_HIDE : SW_SHOW);
+    }
+    void sourceStatus(const std::string& text) {
+        if (hasModel()) {
+            if (!text.empty()) OutputDebugStringA(("FAHSaver source: "+text+"\n").c_str());
+            message("");
+        } else message(text);
+    }
+    void prepareCache() {
+        try {
+            std::string selector = options.source;
+            selector.push_back('\0'); selector += options.unit;
+            cache = std::make_unique<fah::SnapshotCache>(snapshotCachePath(),std::move(selector),cacheDiagnostic);
+        } catch (const std::exception& error) { cacheDiagnostic(error.what()); }
+        if (!cache) return;
+        try {
+            if (auto snapshot = cache->load()) liveModel.seed(std::move(snapshot));
+            revision = liveModel.revision();
+        } catch (const std::exception& error) { cacheDiagnostic(error.what()); }
     }
     void start() {
         GetCursorPos(&initialMouse);
@@ -257,14 +287,15 @@ struct App {
         adapterName = renderer->adapter();
         if (!options.capture.empty()) { capture = fah::readCapture(options.capture); ++revision; message(""); }
         else if (!options.source.empty()) {
+            prepareCache();
             const HWND target = window;
             source = fah::makeSource({options.source,options.unit},[this,target](fah::SourceEvent event) {
                 auto value = std::make_unique<fah::SourceEvent>(std::move(event));
                 if (PostMessageW(target,sourceMessage,0,reinterpret_cast<LPARAM>(value.get()))) value.release();
                 else deliveryFailed = true;
             });
-            message("Connecting to FAH…"); source->start();
-        } else message("Set a live source URL or capture file in Screen Saver Settings → Settings.");
+            sourceStatus("Connecting to FAH…");
+        } else message("Set a live source URL in Screen Saver Settings → Settings.");
         started = Clock::now();
         if (benchmark) { cpuStarted = processSeconds(); threadCpuStarted = threadCpuMilliseconds(); }
     }
@@ -273,6 +304,7 @@ struct App {
         MSG event;
         while (PeekMessageW(&event,window,sourceMessage,sourceMessage,PM_REMOVE))
             delete reinterpret_cast<fah::SourceEvent*>(event.lParam);
+        if (cache) cacheDrain = std::thread([pending = std::move(cache)]() mutable { pending.reset(); });
     }
     void snapshotActiveEnd() {
         if (benchmark && !activeEnded) { activeEnd = benchmarkPoint(); activeEnded = true; }
@@ -281,22 +313,22 @@ struct App {
         if (benchmark && !shutdownEnded) { shutdownEnd = benchmarkPoint(); shutdownEnded = true; }
     }
     void receive(fah::SourceEvent event) {
+        const bool completeFrame = liveModel.receive(event,options.loop);
+        if (revision != liveModel.revision()) {
+            revision = liveModel.revision(); redraw = true;
+            if (!hasModel()) renderer->setScene({});
+        }
+        if (completeFrame && cache) {
+            try { cache->queue(liveModel.latestTopology(),liveModel.latestFrame()); }
+            catch (const std::exception& error) { cacheDiagnostic(error.what()); }
+        }
         switch (event.kind) {
         case fah::SourceEvent::Kind::Reset:
-            capture = {}; retainedBytes = 0; ++revision; renderer->setScene({}); redraw = true;
-            message("Waiting for current work-unit visualisation…"); break;
-        case fah::SourceEvent::Kind::Topology:
-            if (!event.topology) throw std::runtime_error("Source delivered an empty topology event");
-            capture.topology = *event.topology; capture.frames.clear(); retainedBytes = 0; ++revision; break;
-        case fah::SourceEvent::Kind::Frame:
-            if (!event.frame) throw std::runtime_error("Source delivered an empty frame event");
-            if (!options.loop) { capture.frames.clear(); retainedBytes = 0; ++revision; }
-            if (capture.frames.size() >= 100000 || event.frame->size() > (128u*1024*1024-retainedBytes)/sizeof(fah::Vec3))
-                throw std::runtime_error("Visualisation history exceeds the 128 MiB or 100,000 snapshot limit");
-            capture.frames.push_back(*event.frame); retainedBytes += event.frame->size()*sizeof(fah::Vec3); message(""); break;
-        case fah::SourceEvent::Kind::Status: message(event.text); break;
-        case fah::SourceEvent::Kind::Error:
-            capture = {}; retainedBytes = 0; ++revision; renderer->setScene({}); redraw = true; message(event.text); break;
+            sourceStatus("Waiting for current work-unit visualisation…"); break;
+        case fah::SourceEvent::Kind::Topology: break;
+        case fah::SourceEvent::Kind::Frame: message(""); break;
+        case fah::SourceEvent::Kind::Status:
+        case fah::SourceEvent::Kind::Error: sourceStatus(event.text); break;
         }
     }
     void render() {
@@ -305,8 +337,9 @@ struct App {
         const double elapsed = std::chrono::duration<double>(Clock::now()-started).count();
         if (options.seconds > 0 && elapsed >= options.seconds) { PostMessageW(window,WM_CLOSE,0,0); return; }
         if (IsIconic(window)) return;
-        if (!capture.frames.empty()) {
-            const std::size_t frame = snapshotIndex(elapsed,capture.frames.size(),options);
+        const auto* shown = displayedCapture();
+        if (shown && !shown->frames.empty()) {
+            const std::size_t frame = snapshotIndex(elapsed,shown->frames.size(),options);
             int style = options.style;
             const auto period = std::uint64_t(elapsed/10);
             if (style == 4) style = int(period%3)+1;
@@ -316,7 +349,7 @@ struct App {
             }
             if (lastRevision != revision || lastFrame != frame || lastStyle != style) {
                 PhaseTimer sceneTimer(benchmark);
-                renderer->setScene(fah::makeScene(capture.topology,capture.frames[frame],static_cast<fah::Style>(style)));
+                renderer->setScene(fah::makeScene(shown->topology,shown->frames[frame],static_cast<fah::Style>(style)));
                 if (benchmark) addPhase(sceneBuildUpload,sceneTimer.finish());
                 lastRevision = revision; lastFrame = frame; lastStyle = style;
             }
@@ -349,6 +382,7 @@ struct App {
             << "\",\n  \"elapsed_seconds\":" << elapsed << ",\n  \"submitted_frames\":" << frameCount
             << ",\n  \"snapshot_interval_seconds\":" << options.snapshotInterval
             << ",\n  \"snapshot_playback\":\"" << (options.loop ? "loop" : "latest") << '"'
+            << ",\n  \"cached_model_shown\":" << (options.capture.empty() && liveModel.usingFallback() ? "true" : "false")
             << ",\n  \"background\":\"" << (options.sky ? (options.darkSky ? "dark" : "sky") : "solid") << '"'
             << ",\n  \"submit_rate_fps\":" << (elapsed > 0 ? frameCount/elapsed : 0)
             << ",\n  \"cpu_process_seconds\":" << lifecycleEnd.processCPU-cpuStarted
@@ -529,6 +563,8 @@ int run(const std::vector<std::wstring>& arguments) {
                 throw std::runtime_error("Cannot set native client pixel dimensions");
         }
         app.start(); ShowWindow(window,SW_SHOW); UpdateWindow(window);
+        if (app.liveModel.available()) app.render();
+        if (app.source) app.source->start();
         const HANDLE timer = CreateWaitableTimerExW(nullptr,nullptr,0x00000002,TIMER_ALL_ACCESS);
         if (!timer) throw std::runtime_error("High-resolution frame timer unavailable; Windows 10 version 1803 or later is required");
         struct Timer { HANDLE value; ~Timer() { CloseHandle(value); } } timerOwner{timer};
@@ -545,7 +581,7 @@ int run(const std::vector<std::wstring>& arguments) {
             if (!running) break;
             if (Clock::now() >= next) {
                 app.render();
-                const double interval = app.capture.frames.empty() ? .2 : 1.0/app.options.fps;
+                const double interval = app.hasModel() ? 1.0/app.options.fps : .2;
                 next += std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(interval));
                 if (next < Clock::now()) next = Clock::now();
             }

@@ -16,7 +16,8 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Locate `fah-preview.exe` in the build output, then run a recorded model:
+For development and benchmarks, locate `fah-preview.exe` in the build output and
+run a recorded model:
 
 ```powershell
 .\fah-preview.exe --capture C:\private\protein.json --fps 60 --seconds 30 --style 2 --playback loop --background sky --metrics C:\private\vulkan.json
@@ -34,9 +35,10 @@ snapshots every 0.5 seconds by default. Use `--snapshot-interval SECONDS` for a
 finite interval from 0.05 to 60 seconds. Latest mode ignores this cadence.
 Display frame rate is independent.
 `--fps` accepts integers from 1 to 240. No model is substituted when data is
-unavailable; the host displays connection or configuration status instead.
+unavailable and no saved model exists; the host displays connection or
+configuration status instead.
 Live loop retention fails explicitly at 128 MiB of coordinates or 10,000
-snapshots. Latest mode retains one snapshot. A disconnection clears the model.
+snapshots. Latest mode retains one snapshot.
 
 `--fullscreen true` runs the harness through the same full-screen host and input
 handlers as `/s`. It defaults to false and is not saved in preferences. Use
@@ -61,6 +63,28 @@ sky/grid and a custom solid colour. The corresponding CLI values are `sky`,
 `dark` and `solid`. Existing `sky` and `solid` settings keep their previous
 meaning. The sky/grid presets are native approximations; they do not reproduce
 the web viewer's procedural atmosphere exactly.
+
+Screensaver settings select a live FAH source only. The old `Capture` registry
+preference is ignored. A missing or blank `Source` setting uses the local FAH
+endpoint at `ws://127.0.0.1:7396/api/websocket`. The `--capture` CLI option remains
+available for developer fixtures and benchmarks.
+
+The latest complete topology and one snapshot are saved automatically in
+`%LOCALAPPDATA%\FAHSaver\latest-model.cache`. A matching saved model is drawn
+before live updates start and stays visible while reconnecting or offline.
+The cache is bound to the configured source URL and optional requested WU using
+an identifier; neither the URL nor account/client state is stored in the file.
+Changing the source or requested WU prevents an unrelated model from loading.
+The first complete new live snapshot replaces the saved model. A topology-only
+update keeps the old model until its matching frame arrives.
+
+Loop history is kept only while live. A disconnection retains the latest single
+snapshot, rather than replaying stale history. The model continues to rotate
+without connection overlays. Without a valid saved model, normal status/error
+text remains visible. Cache read/write errors are nonfatal and go to the Windows
+debug output. Writes coalesce on a background worker; there is no disk I/O per
+display frame. Closing the window drains the cache off the UI path, and the
+process waits for that drain after the window closes.
 
 The initial full-screen host uses one surface across the virtual desktop. Mixed
 refresh rates and independent per-monitor scenes need further host work.

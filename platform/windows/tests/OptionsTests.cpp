@@ -49,6 +49,13 @@ int main() {
     check(parseOptions({"--capture", "file.json"},saved).source.empty());
     saved.source.clear(); saved.capture = "file.json";
     check(parseOptions({"--source", "ws://localhost:7396/api/websocket"},saved).capture.empty());
+    Options legacy; legacy.capture = "missing-legacy-capture.json"; legacy.fps = 30;
+    const auto migrated = liveScreensaverOptions(legacy);
+    check(migrated.capture.empty() && migrated.source == "ws://127.0.0.1:7396/api/websocket" && migrated.fps == 30);
+    legacy.source = "ws://configured-host:7396/api/websocket";
+    check(liveScreensaverOptions(legacy).source == legacy.source);
+    const auto developerCapture = parseOptions({"--capture", "fixture.json"},migrated);
+    check(developerCapture.source.empty() && developerCapture.capture == "fixture.json");
     rejects([] { parseOptions({"--fps", "0"}); });
     rejects([] { parseOptions({"--fps", "60extra"}); });
     rejects([] { parseOptions({"--fps", "241"}); });
