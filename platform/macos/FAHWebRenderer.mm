@@ -1,4 +1,5 @@
 #import "FAHWebRenderer.h"
+#import <os/log.h>
 #include "nlohmann/json.hpp"
 #include <algorithm>
 #include <cmath>
@@ -247,6 +248,10 @@ static void configureSharedSession(WKWebViewConfiguration *configuration) {
     if ([body[@"type"] isEqual:@"ready"]) { _ready = YES; [self pump]; }
     else if ([body[@"type"] isEqual:@"error"]) [self fail:[body[@"message"] isKindOfClass:NSString.class] ? body[@"message"] : @"The Web renderer failed."];
     else if ([body[@"type"] isEqual:@"frame"]) {
+        // One message per start verifies remote-host backing dimensions without a polling timer.
+        static os_log_t log = os_log_create("org.fahsaver.screensaver", "web-renderer");
+        os_log_info(log, "First model frame: %lu x %lu; draw count %lu",
+            [body[@"width"] unsignedLongValue], [body[@"height"] unsignedLongValue], [body[@"draws"] unsignedLongValue]);
         NSMutableDictionary *metrics = _javascriptMetrics ? [_javascriptMetrics mutableCopy] : [NSMutableDictionary new];
         [metrics addEntriesFromDictionary:body]; _javascriptMetrics = metrics;
     }
