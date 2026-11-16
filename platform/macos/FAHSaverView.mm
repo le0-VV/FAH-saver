@@ -10,6 +10,14 @@
 
 static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 
+static BOOL legacySaverHost() {
+    return [NSBundle.mainBundle.bundleIdentifier isEqualToString:@"com.apple.ScreenSaver.Engine.legacyScreenSaver"];
+}
+
+static BOOL frontmostIsLoginWindow() {
+    return [NSWorkspace.sharedWorkspace.frontmostApplication.bundleIdentifier isEqualToString:@"com.apple.loginwindow"];
+}
+
 @interface FAHDecimalFormatter : NSFormatter
 @end
 @implementation FAHDecimalFormatter
@@ -115,6 +123,9 @@ static void cacheError(const std::string& message) {
     CGSize _lastDrawableSize;
     __weak NSWindow *_observedWindow;
     id _windowCloseObserver;
+    id _workspaceSessionObserver;
+    BOOL _sessionGuardEnabled, _sessionArmed, _sessionDismissed, _sessionRestartRequested;
+    BOOL _sessionLoginObserved, _sessionSawActivation;
     NSUInteger _sourceGeneration, _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_playback, *_style, *_background;
@@ -164,7 +175,31 @@ static void cacheError(const std::string& message) {
     [self loadOptions];
     [self prepareCache];
     [self updateStatus];
+    _sessionGuardEnabled = !isPreview && legacySaverHost();
+    if (_sessionGuardEnabled) {
+        _sessionLoginObserved = frontmostIsLoginWindow();
+        __weak FAHSaverView *weakSelf = self;
+        _workspaceSessionObserver = [NSWorkspace.sharedWorkspace.notificationCenter
+            addObserverForName:NSWorkspaceDidActivateApplicationNotification object:nil queue:NSOperationQueue.mainQueue
+            usingBlock:^(NSNotification *note) { [weakSelf workspaceApplicationActivated:note]; }];
+    }
     return self;
+}
+
+- (void)workspaceApplicationActivated:(NSNotification *)notification {
+    if (!_sessionGuardEnabled || self.isPreview) return;
+    id application = notification.userInfo[NSWorkspaceApplicationKey];
+    if (![application respondsToSelector:@selector(bundleIdentifier)]) return;
+    _sessionSawActivation = YES;
+    _sessionLoginObserved = [[application bundleIdentifier] isEqualToString:@"com.apple.loginwindow"];
+    if (_sessionLoginObserved) {
+        if (self.isAnimating) _sessionArmed = YES;
+        const BOOL restart = _sessionRestartRequested;
+        _sessionRestartRequested = NO;
+        if (restart) [self startAnimation];
+    } else if (_sessionArmed) {
+        [self stopAnimation];
+    }
 }
 
 - (NSString *)sourceURL {
@@ -265,6 +300,15 @@ static void cacheError(const std::string& message) {
 
 - (void)startAnimation {
     if (self.isAnimating) return;
+    if (_sessionGuardEnabled && !self.isPreview) {
+        // An explicit workspace exit is authoritative; a cached frontmost query must not undo it.
+        if (!_sessionSawActivation && !_sessionDismissed && legacySaverHost() && frontmostIsLoginWindow())
+            _sessionLoginObserved = YES;
+        if (_sessionDismissed && !_sessionLoginObserved) {
+            _sessionRestartRequested = YES;
+            return;
+        }
+    }
     if (self.isHiddenOrHasHiddenAncestor || _detachedFromSuperview) {
         _resumeWhenPresented = YES;
         return;
@@ -273,6 +317,9 @@ static void cacheError(const std::string& message) {
     if (!_renderer) { [self updateStatus]; return; }
     [self preparePresentationView];
     [super startAnimation];
+    _sessionDismissed = NO;
+    if (_sessionGuardEnabled && !self.isPreview && _sessionLoginObserved) _sessionArmed = YES;
+    _sessionRestartRequested = NO;
     ++_sourceGeneration;
     if (_source) { _source->stop(); _source.reset(); }
     fah::SourceEvent reset;
@@ -346,6 +393,11 @@ static void cacheError(const std::string& message) {
 
 - (void)stopAnimation {
     _resumeWhenPresented = NO;
+    _sessionRestartRequested = NO;
+    if (_sessionGuardEnabled && !self.isPreview) {
+        _sessionDismissed = YES;
+        _sessionArmed = NO;
+    }
     [self stopAnimationResources];
 }
 
@@ -401,6 +453,7 @@ static void cacheError(const std::string& message) {
 }
 
 - (void)dealloc {
+    if (_workspaceSessionObserver) [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:_workspaceSessionObserver];
     if (_windowCloseObserver) [NSNotificationCenter.defaultCenter removeObserver:_windowCloseObserver];
     ++_sourceGeneration;
     if (_source) _source->stop();
