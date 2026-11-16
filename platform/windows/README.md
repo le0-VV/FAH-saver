@@ -7,6 +7,7 @@ Keep the `shaders` directory beside the executable.
 Requirements: Windows 10 version 1803 or later, a C++17 compiler with Windows
 SDK, and Vulkan headers, loader/import library and `glslangValidator` at build
 time. At runtime, the GPU driver must provide Vulkan graphics and presentation.
+CPU-only Vulkan devices are rejected with an explicit error.
 The root build must define `fah_core` and `fah_source` before adding this directory.
 
 ```powershell

@@ -163,6 +163,7 @@ struct Renderer::Impl {
             vkGetPhysicalDeviceQueueFamilyProperties(candidate, &families, queues.data());
             VkPhysicalDeviceProperties properties;
             vkGetPhysicalDeviceProperties(candidate, &properties);
+            if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) continue;
             const int score = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : 1;
             for (std::uint32_t index = 0; index < families; ++index) {
                 VkBool32 supportsPresent = false;
@@ -175,7 +176,7 @@ struct Renderer::Impl {
                 }
             }
         }
-        if (!physical) throw std::runtime_error("No Vulkan adapter supports graphics and window presentation");
+        if (!physical) throw std::runtime_error("No hardware Vulkan GPU supports graphics and window presentation");
         vkGetPhysicalDeviceMemoryProperties(physical, &memory);
         const float priority = 1;
         VkDeviceQueueCreateInfo queueInfo{}; queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
