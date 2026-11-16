@@ -136,6 +136,10 @@ static double cpuSeconds() {
 - (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     (void)webView; (void)navigation; [self fail:error.localizedDescription];
 }
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
+    (void)navigation;
+    [webView.configuration.userContentController removeAllUserScripts];
+}
 - (void)webView:(WKWebView *)webView didFailProvisionalNavigation:(WKNavigation *)navigation withError:(NSError *)error {
     (void)webView; (void)navigation; [self fail:error.localizedDescription];
 }

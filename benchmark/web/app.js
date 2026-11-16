@@ -313,7 +313,10 @@
       }
       readSettings(); initialiseGL(); resize();
       if (params.get('benchmark') === '1') { controls.hidden = true; status.hidden = true; }
-      if (window.nativeCapture !== undefined) setCapture(window.nativeCapture);
+      if (window.nativeCapture !== undefined) {
+        setCapture(window.nativeCapture);
+        delete window.nativeCapture;
+      }
       else if (params.has('capture')) {
         capture = await readCaptureURL(params.get('capture'));
         previousFrame = -1; previousStyle = -1; epoch = performance.now(); nextDue = epoch;
