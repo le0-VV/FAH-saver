@@ -63,16 +63,16 @@ static double cpuSeconds() {
     NSURL *html = [NSURL fileURLWithPath:self.options[@"html"]];
     NSURLComponents *url = [NSURLComponents componentsWithURL:html resolvingAgainstBaseURL:NO];
     NSMutableArray *query = [NSMutableArray array];
-    for (NSString *key in @[@"style", @"fps", @"seconds", @"background", @"playback"])
+    for (NSString *key in @[@"style", @"fps", @"seconds", @"warmup", @"background", @"playback"])
         [query addObject:[NSURLQueryItem queryItemWithName:key value:self.options[key]]];
     [query addObject:[NSURLQueryItem queryItemWithName:@"benchmark" value:@"1"]];
     url.queryItems = query;
     [self.web loadFileURL:url.URL allowingReadAccessToURL:[html URLByDeletingLastPathComponent]];
     __weak Benchmark *weakSelf = self;
-    [NSTimer scheduledTimerWithTimeInterval:self.options[@"seconds"].doubleValue + 30 repeats:NO
+    [NSTimer scheduledTimerWithTimeInterval:self.options[@"seconds"].doubleValue + self.options[@"warmup"].doubleValue + 30 repeats:NO
         block:^(NSTimer *timer) {
             (void)timer;
-            if (!weakSelf.finished) [weakSelf fail:@"WebGL comparison timed out"];
+            if (weakSelf) [weakSelf fail:@"WebGL comparison timed out"];
         }];
 }
 
@@ -147,15 +147,15 @@ static double cpuSeconds() {
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSMutableDictionary *options = [@{@"width": @"1280", @"height": @"720", @"fps": @"60",
-            @"seconds": @"10", @"style": @"1", @"background": @"sky", @"playback": @"latest"} mutableCopy];
-        NSSet *known = [NSSet setWithArray:@[@"capture", @"html", @"width", @"height", @"fps", @"seconds",
+            @"seconds": @"10", @"warmup": @"0", @"style": @"1", @"background": @"sky", @"playback": @"latest"} mutableCopy];
+        NSSet *known = [NSSet setWithArray:@[@"capture", @"html", @"width", @"height", @"fps", @"seconds", @"warmup",
             @"style", @"background", @"playback", @"output", @"screenshot"]];
         for (int i = 1; i < argc; i += 2) {
             NSString *argument = @(argv[i]);
             if ([argument isEqual:@"--help"]) {
                 puts("Usage: fah-web-benchmark --capture FILE --html index.html [--fps 60] [--seconds 10]\n"
                      "  [--style 1|2|3|cycle|random] [--playback latest|loop] [--background sky|solid]\n"
-                     "  [--width 1280] [--height 720] [--output results.json] [--screenshot image.png]");
+                     "  [--width 1280] [--height 720] [--warmup 0..120] [--output results.json] [--screenshot image.png]");
                 return 0;
             }
             NSString *key = [argument hasPrefix:@"--"] ? [argument substringFromIndex:2] : @"";
@@ -165,13 +165,14 @@ int main(int argc, const char *argv[]) {
             options[key] = @(argv[i + 1]);
         }
         if (!options[@"capture"] || !options[@"html"]) { fputs("--capture and --html are required\n", stderr); return 2; }
-        for (NSString *key in @[@"width", @"height", @"fps", @"seconds"]) {
+        for (NSString *key in @[@"width", @"height", @"fps", @"seconds", @"warmup"]) {
             const char *text = [options[key] UTF8String];
             char *end;
             double value = strtod(text, &end);
-            double maximum = [key isEqual:@"fps"] ? 240 : ([key isEqual:@"seconds"] ? 3600 : 8192);
-            if (*end || !std::isfinite(value) || value < 1 || value > maximum ||
-                (![key isEqual:@"seconds"] && std::floor(value) != value)) {
+            double maximum = [key isEqual:@"fps"] ? 240 : ([key isEqual:@"seconds"] ? 3600 : ([key isEqual:@"warmup"] ? 120 : 8192));
+            double minimum = [key isEqual:@"warmup"] ? 0 : 1;
+            if (*end || !std::isfinite(value) || value < minimum || value > maximum ||
+                (![key isEqual:@"seconds"] && ![key isEqual:@"warmup"] && std::floor(value) != value)) {
                 fprintf(stderr, "Invalid value for --%s\n", key.UTF8String); return 2;
             }
         }
