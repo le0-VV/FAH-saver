@@ -191,6 +191,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     if (_sheet) return _sheet;
     _sheet = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,580,400)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
+    _sheet.releasedWhenClosed = NO;
     _sheet.title = @"FAH Saver Options";
     NSView *content = _sheet.contentView;
     auto label = [&](NSString *title, CGFloat y) {

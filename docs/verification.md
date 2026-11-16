@@ -130,6 +130,28 @@ inexpensive approximations. Sources: [viewer](https://github.com/FoldingAtHome/f
 [sky](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/viewer/sky.frag)
 and [dark theme](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/dark.styl).
 
+## macOS 0.1.5 options-window lifetime
+
+The user reported that Options sometimes did not open. The ignored click was
+observed in System Settings with the installed 0.1.4 hosts. The programmatic
+options NSWindow still used the default release-on-close setting, which
+[Apple requires ARC clients to disable](https://developer.apple.com/documentation/appkit/nswindow/isreleasedwhenclosed).
+Version 0.1.5 sets that flag to false.
+
+The new lifecycle check rejected the unsafe ownership flag before the fix, then
+passed ten Save and ten Cancel cycles with sheet attachment, completion, explicit
+close and reopen. It checks saved values and discarded edits in a unique test
+preference domain. Test windows are transparent and ignore mouse input; no FAH
+source starts. All ten CTest checks passed after the fix.
+
+The live System Settings session continued ignoring Options after replacing the
+bundle and reloading its old saver hosts. A normal quit and reopen of System
+Settings cleared that state. Options then opened three consecutive times and
+showed Version 0.1.5 (6). Two were cancelled without edits; the third was left open
+for the user. The installed signature and binary hash matched the build. These
+observations establish a corrected ownership fault and recovery of the current
+host session; they do not prove the intermittent host issue cannot recur.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a

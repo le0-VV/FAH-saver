@@ -6,6 +6,7 @@ The CMake subdirectory builds these targets:
 - `FAHSaver`: a real ScreenSaverView module, packaged as `FAHSaver.saver`.
 - `fah_macos_saver_smoke`: a hidden module host for lifecycle smoke checks.
 - `fah_macos_render_options_tests`: offscreen GPU checks when testing is enabled.
+- `fah_macos_options_lifecycle_tests`: repeated sheet Save/Cancel/close/reopen checks.
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
@@ -65,6 +66,10 @@ selects these backgrounds in the preview. The panel's lower-left corner shows
 the version and build of the loaded saver bundle. Options use ScreenSaverDefaults. Starting and stopping
 the saver starts and stops its native source; a source reset clears the model.
 Missing data and connection errors appear as text over the background.
+The programmatic options window disables AppKit's automatic release-on-close;
+ARC owns its lifetime. The lifecycle test uses transparent, non-interactive
+windows and an isolated preference domain for ten saves and ten cancels. It
+checks sheet completion, cleared attachments, saved values and discarded edits.
 
 ```sh
 python3 /path/to/source/platform/macos/test_cli.py ./platform/macos/fah_macos_preview
