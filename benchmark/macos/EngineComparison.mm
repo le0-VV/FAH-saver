@@ -273,7 +273,7 @@ static NSNumber *draws(NSDictionary *metrics) {
         const CGFloat width=[layout[@"width"] doubleValue]/scale,height=[layout[@"height"] doubleValue]/scale;
         ECCanvas *canvas=[ECCanvas new]; canvas.layout=layout; canvas.scale=scale;
         canvas.window=[[ECWindow alloc] initWithContentRect:NSMakeRect(0,0,width,height)
-            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskFullSizeContentView
+            styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable
             backing:NSBackingStoreBuffered defer:NO screen:screen];
         canvas.window.releasedWhenClosed=NO;
         canvas.window.title=[NSString stringWithFormat:@"FAH Engine Comparison — %@%@",_config->engine,
@@ -281,7 +281,8 @@ static NSNumber *draws(NSDictionary *metrics) {
         canvas.window.titlebarAppearsTransparent=YES; canvas.window.titleVisibility=NSWindowTitleHidden;
         canvas.window.delegate=self; canvas.window.escapeHandler=^{[weakSelf cancel:@"escape"];};
         const CGFloat offset=12*_canvases.count;
-        [canvas.window setFrame:NSMakeRect(screen.frame.origin.x+offset,screen.frame.origin.y+offset,width,height) display:NO];
+        // Layout dimensions describe content; keep AppKit's additional titlebar height.
+        [canvas.window setFrameOrigin:NSMakePoint(screen.frame.origin.x+offset,screen.frame.origin.y+offset)];
         if([_config->engine isEqual:@"metal"]) {
             NSError *error=nil; canvas.metal=[[FAHRenderer alloc] initWithDevice:MTLCreateSystemDefaultDevice() error:&error];
             require(canvas.metal!=nil,"Metal renderer could not be created");
