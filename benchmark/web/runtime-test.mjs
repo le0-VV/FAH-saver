@@ -198,6 +198,65 @@ function harness() {
   r.dispose();
 }
 
+{
+  const h = harness(), r = h.runtime;
+  r.configure({frameDriver: 'native'}); r.setCapture(fixture); r.start();
+  assert.equal(r.metrics().draws, 1); assert.equal(h.queued.size, 0);
+  assert.equal(r.metrics().frameDriver, 'native'); assert.equal(r.metrics().rafCallbackCount, 0);
+  assert.equal(r.advanceTo(0), false); assert.equal(r.advanceTo(.005), false);
+  assert.equal(r.advanceTo(.02), true); assert.equal(r.metrics().elapsedSeconds, .02);
+  assert.equal(h.queued.size, 0, 'Host-clock draws must never request animation frames');
+  assert.ok(!h.state.extensions.includes('EXT_disjoint_timer_query_webgl2'));
+  assert.match(r.metrics().timingKind, /Host-clock/);
+  for (const time of [-1, NaN, Infinity, '1', .01])
+    assert.throws(() => r.advanceTo(time), /Host render time/);
+  assert.throws(() => r.configure({frameDriver: 'raf'}), /Stop rendering/);
+  assert.throws(() => r.configure({frameDriver: 'timer'}), /Frame driver/);
+  r.beginMeasurement(); const before = r.metrics().draws;
+  assert.equal(r.advanceTo(.04), true); assert.equal(r.advanceTo(.06), true);
+  const m = r.metrics();
+  assert.equal(m.measurementDraws, 2); assert.equal(m.draws, before + 2);
+  assert.equal(m.cpuSubmitMs.samples, 2); assert.equal(m.hostCallbackIntervalsMs.samples, 1);
+  assert.equal(m.rafCallbackIntervalsMs.samples, 0); assert.equal(m.hostAdvanceCalls, 2);
+  assert.equal(m.measurementFrameDriver, 'native'); assert.equal(m.drawCallbackFPS, 50);
+  assert.equal(m.gpuTiming.status, 'unsupported');
+  r.stop(); const stopped = r.metrics();
+  assert.equal(r.advanceTo(1), false); h.advance(500);
+  assert.equal(r.metrics().draws, stopped.draws); assert.equal(r.metrics().hostAdvanceCalls, stopped.hostAdvanceCalls);
+  assert.equal(h.queued.size, 0); r.dispose();
+}
+
+{
+  const h = harness(), r = h.runtime;
+  r.configure({frameDriver: 'native'}); r.start();
+  assert.equal(r.advanceTo(1.5), false, 'Empty sessions update host time without continuous background draws');
+  h.advance(5000); r.setCapture(fixture);
+  assert.equal(r.metrics().elapsedSeconds, 1.5, 'First model arrival uses native elapsed time rather than performance.now');
+  assert.equal(h.queued.size, 0);
+  assert.equal(r.advanceTo(1.52), true); r.replaceLatest(fixture.frames[0]);
+  assert.equal(r.metrics().elapsedSeconds, 1.52);
+  assert.equal(r.advanceTo(1.54), true); assert.equal(r.metrics().elapsedSeconds, 1.54);
+  r.dispose();
+}
+
+{
+  const h = harness(), r = h.runtime;
+  r.setCapture(fixture); r.start();
+  const staleRaf = [...h.queued.values()][0];
+  h.advance(20);
+  assert.equal(r.metrics().rafCallbackCount, 1);
+  assert.equal(r.metrics().firstRafTimestampMs, 1020); assert.equal(r.metrics().firstRafPerformanceNowMs, 1020);
+  assert.equal(r.metrics().epochMs, 1000); assert.ok(r.metrics().nextDueMs > 1020);
+  r.stop(); r.configure({frameDriver: 'native'}); r.start();
+  const draws = r.metrics().draws;
+  staleRaf(10000);
+  assert.equal(r.metrics().draws, draws, 'A stale rAF generation cannot draw after a native-clock restart');
+  assert.equal(h.queued.size, 0);
+  r.stop(); r.configure({frameDriver: 'raf'}); r.start();
+  assert.equal(h.queued.size, 1, 'Explicitly selecting rAF while stopped restores ordinary scheduling');
+  assert.equal(r.advanceTo(1), false); r.dispose();
+}
+
 const page = fs.readFileSync(new URL('./saver.html', import.meta.url), 'utf8');
 assert.match(page, /default-src 'none'/); assert.match(page, /connect-src 'none'/); assert.match(page, /style-src 'self'/);
 assert.doesNotMatch(page, /<form|type="file"|https?:\/\//);

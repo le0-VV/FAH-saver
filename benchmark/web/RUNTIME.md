@@ -17,7 +17,7 @@ There is no per-frame message stream.
   (`fixed`, `cycle`, `random`), `playback` (`latest`, `loop`), `background`
   (`sky`, `dark`, `solid`), `colour` (three components from zero to one),
   `snapshotInterval` (finite, at least 0.05 seconds), `styleInterval` (positive)
-  and boolean `collectMetrics`. Defaults are 60 fps, style 1, latest, light sky,
+  boolean `collectMetrics`, and internal `frameDriver` (`raf` or `native`). Defaults are 60 fps, style 1, latest, light sky,
   one second per snapshot, ten seconds per style, and metrics disabled.
 - `setCapture(rawCapture)`: replaces a complete topology/model using the normal
   FAH capture format. `setCapture(null)` clears the old model immediately.
@@ -28,12 +28,18 @@ There is no per-frame message stream.
   retaining the model. A later start begins a new animation clock.
 - `dispose()`: stops callbacks and deletes GPU resources/context. The native
   host must dispose before dropping the web view.
+- `advanceTo(seconds)`: in native-clock mode, renders an eligible frame from
+  monotonic, non-negative host elapsed time. Stopped/empty sessions return false.
+  The configured frame limit still applies. Native-clock mode never requests rAF.
+  Select the driver while stopped; the host must keep its own asynchronous
+  request-generation guards when replacing a web view.
 - `renderAt(seconds)`: draws one fixed-time frame, including while stopped or
   hidden, for image verification.
 - `beginMeasurement()` / `metrics()`: explicit measurement enables bounded CPU,
   callback and optional GPU-query samples. Draws are lifetime counts;
   `measurementDraws` resets at measurement start. Measurement preserves camera
-  time and the current model. Disabling `collectMetrics` clears measurement data.
+  time and the current model. Native-clock intervals are labelled separately
+  from rAF intervals. Disabling `collectMetrics` clears measurement data.
 
 Capture/frame updates preserve the rotation clock. Initial start draws the cached model synchronously at zero seconds before
 scheduling animation. Without a model, it draws its background once and waits
@@ -50,3 +56,8 @@ reported explicitly. Callback cadence does not establish display presentation.
 Run `node benchmark/web/self-test.mjs` from the repository root. Native WebKit
 checks must additionally establish real shader compilation, image pixels,
 physical resolution and asynchronous host teardown.
+
+Runtime metrics also expose numeric-only `rafCallbackCount`,
+`firstRafTimestampMs`, `firstRafPerformanceNowMs`, `epochMs` and `nextDueMs` for
+clock diagnostics. The first rAF clock samples are recorded once. They add no
+polling or per-frame script messages. No rAF is requested in native-clock mode.

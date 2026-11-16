@@ -17,7 +17,9 @@
     requestFrame = callback => requestAnimationFrame(callback), cancelFrame = id => cancelAnimationFrame(id),
     onError = () => {}, onFirstFrame = () => {}}) {
     let settings = normaliseOptions(), capture = null, running = false, disposed = false, generation = 0;
-    let animation = 0, epoch = 0, nextDue = 0, lastSeconds = 0, lastError = null, notifiedFrame = false;
+    let animation = 0, epoch = 0, nextDue = 0, lastSeconds = 0, nativeSeconds = 0, nextNativeDue = 0;
+    let lastError = null, notifiedFrame = false;
+    let rafCallbackCount = 0, firstRafTimestampMs = null, firstRafPerformanceNowMs = null;
     let measurement = null, finalGpu = null;
     const engine = renderer || createRenderer(canvas, {onContextLost: fail});
 
@@ -34,10 +36,11 @@
       stop(); onError(lastError);
     }
     function schedule() {
-      if (!running || !capture || animation) return;
+      if (!running || !capture || animation || settings.frameDriver !== 'raf') return;
       const token = generation;
       animation = requestFrame(timestamp => tick(timestamp, token));
     }
+    function currentSeconds() { return settings.frameDriver === 'native' ? nativeSeconds : elapsedSeconds(now(), epoch); }
     function draw(seconds, timestamp = now(), record = false) {
       const before = now();
       const result = engine.draw(seconds, record ? measurement?.gpuTimer : null);
@@ -55,7 +58,9 @@
       return result;
     }
     function tick(timestamp, token) {
-      if (!running || disposed || token !== generation) return;
+      rafCallbackCount++;
+      if (firstRafTimestampMs === null) { firstRafTimestampMs = timestamp; firstRafPerformanceNowMs = now(); }
+      if (!running || disposed || token !== generation || settings.frameDriver !== 'raf') return;
       animation = 0;
       if (!capture) return;
       try {
@@ -78,23 +83,25 @@
       settings = {...settings, collectMetrics: true}; engine.configure(settings);
       const gpuTimer = globalThis.FAHGpuTimer.createGpuTimer(engine.gl);
       measurement = {started: now(), firstDraw: null, lastDraw: null, lastRaf: null, draws: 0,
-        cpu: [], drawIntervals: [], rafIntervals: [], droppedSamples: 0, gpuTimer};
+        cpu: [], drawIntervals: [], rafIntervals: [], hostIntervals: [], lastHost: null, hostCalls: 0,
+        frameDriver: settings.frameDriver, droppedSamples: 0, gpuTimer};
       finalGpu = null;
       return true;
     }
     function configure(value) {
       requireActive();
       const next = normaliseOptions(value, settings);
+      if (running && next.frameDriver !== settings.frameDriver) throw new Error('Stop rendering before changing the frame driver');
       const metricsChanged = next.collectMetrics !== settings.collectMetrics;
       settings = next; engine.configure(settings);
       if (capture && settings.playback === 'latest' && capture.frames.length > 1)
         capture.frames = [capture.frames[capture.frames.length - 1]];
-      nextDue = now();
+      nextDue = now(); nextNativeDue = nativeSeconds * 1000;
       if (metricsChanged && settings.collectMetrics) beginMeasurement();
       else if (metricsChanged) {
         measurement?.gpuTimer?.finish(); measurement = null; finalGpu = null;
       }
-      if (running && !capture) draw(elapsedSeconds(now(), epoch));
+      if (running && !capture) draw(currentSeconds());
       return {...settings, colour: settings.colour.slice()};
     }
     function setCapture(value) {
@@ -103,7 +110,7 @@
         capture = null; engine.setCapture(null);
         if (animation) cancelFrame(animation);
         animation = 0;
-        draw(running ? elapsedSeconds(now(), epoch) : lastSeconds);
+        draw(running ? currentSeconds() : lastSeconds);
         return true;
       }
       const next = typeof value === 'string' ? parseCapture(value, liveLimits) : validateCapture(value, liveLimits);
@@ -112,8 +119,9 @@
       capture = next; engine.setCapture(capture);
       if (running && firstModel) {
         const timestamp = now();
-        draw(elapsedSeconds(timestamp, epoch), timestamp);
+        draw(currentSeconds(), settings.frameDriver === 'native' ? nativeSeconds * 1000 : timestamp);
         nextDue = timestamp + 1000 / settings.fps;
+        nextNativeDue = nativeSeconds * 1000 + 1000 / settings.fps;
       }
       schedule(); return true;
     }
@@ -140,11 +148,29 @@
     function start() {
       requireActive();
       if (running) return true;
-      running = true; generation++; epoch = now(); nextDue = epoch; lastSeconds = 0; notifiedFrame = false;
+      running = true; generation++; epoch = now(); nextDue = epoch; lastSeconds = nativeSeconds = 0; nextNativeDue = 0; notifiedFrame = false;
       if (settings.collectMetrics) beginMeasurement();
       draw(0);
-      if (capture) nextDue = epoch + 1000 / settings.fps;
+      if (capture) { nextDue = epoch + 1000 / settings.fps; nextNativeDue = 1000 / settings.fps; }
       schedule(); return true;
+    }
+    function advanceTo(seconds) {
+      requireActive();
+      if (!running || settings.frameDriver !== 'native') return false;
+      const timestamp = seconds * 1000;
+      if (typeof seconds !== 'number' || !Number.isFinite(timestamp) || seconds < nativeSeconds)
+        throw new Error('Host render time must be finite, non-negative and monotonic');
+      nativeSeconds = seconds;
+      if (measurement) {
+        measurement.gpuTimer?.poll();
+        if (measurement.lastHost !== null) addSample(measurement.hostIntervals, timestamp - measurement.lastHost);
+        measurement.lastHost = timestamp; measurement.hostCalls++;
+      }
+      if (!capture) return false;
+      const deadline = nextFrameDeadline(timestamp, nextNativeDue, settings.fps);
+      if (deadline === null) return false;
+      nextNativeDue = deadline;
+      return draw(seconds, timestamp, !!measurement);
     }
     function stop() {
       if (animation) cancelFrame(animation);
@@ -160,18 +186,23 @@
       const info = engine.info(), gpu = measurement?.gpuTimer?.snapshot() || finalGpu;
       const measured = measurement?.draws || 0;
       const elapsed = measured > 1 ? (measurement.lastDraw - measurement.firstDraw) / 1000 : 0;
-      return {...info, running, disposed, lastError, elapsedSeconds: lastSeconds,
+      return {...info, running, disposed, lastError, elapsedSeconds: lastSeconds, frameDriver: settings.frameDriver,
+        rafCallbackCount, firstRafTimestampMs, firstRafPerformanceNowMs, epochMs: epoch, nextDueMs: nextDue,
         settings: {...settings, colour: settings.colour.slice()},
         measurementDraws: measured, drawCallbackFPS: elapsed > 0 ? (measured - 1) / elapsed : 0,
         measurementElapsedSeconds: measurement ? Math.max(0, now() - measurement.started) / 1000 : 0,
         cpuSubmitMs: summary(measurement?.cpu || []), drawCallbackIntervalsMs: summary(measurement?.drawIntervals || []),
-        rafCallbackIntervalsMs: summary(measurement?.rafIntervals || []), droppedMetricSamples: measurement?.droppedSamples || 0,
+        rafCallbackIntervalsMs: summary(measurement?.rafIntervals || []),
+        hostCallbackIntervalsMs: summary(measurement?.hostIntervals || []), hostAdvanceCalls: measurement?.hostCalls || 0,
+        measurementFrameDriver: measurement?.frameDriver || null, droppedMetricSamples: measurement?.droppedSamples || 0,
         gpuTimeMs: gpu?.samplesMs.length ? summary(gpu.samplesMs) : null,
         gpuTiming: gpu?.info || {status: 'disabled', supported: null, reason: 'GPU timing was not enabled.'},
-        timingKind: 'requestAnimationFrame callback and CPU submission; not presentation timestamps'};
+        timingKind: (measurement?.frameDriver || settings.frameDriver) === 'native' ?
+          'Host-clock draw calls and CPU submission; not presentation timestamps' :
+          'requestAnimationFrame callback and CPU submission; not presentation timestamps'};
     }
     return {configure, setCapture, appendFrames: frames => updateFrames(frames, false),
-      replaceLatest: frame => updateFrames(frame, true), start, stop, dispose, beginMeasurement, metrics,
+      replaceLatest: frame => updateFrames(frame, true), start, advanceTo, stop, dispose, beginMeasurement, metrics,
       renderAt(seconds) { requireActive(); return draw(seconds); }};
   }
 

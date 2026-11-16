@@ -2,7 +2,7 @@
   'use strict';
   const {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt} = globalThis.FAHScene;
   const defaults = Object.freeze({fps: 60, style: 1, styleMode: 'fixed', playback: 'latest',
-    background: 'sky', colour: Object.freeze([.02, .025, .035]), snapshotInterval: 1, styleInterval: 10, collectMetrics: false});
+    background: 'sky', colour: Object.freeze([.02, .025, .035]), snapshotInterval: 1, styleInterval: 10, collectMetrics: false, frameDriver: 'raf'});
 
   function normaliseOptions(input = {}, previous = defaults) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Renderer options must be an object');
@@ -17,6 +17,7 @@
       throw new Error('Colour must have three components between zero and one');
     if (!Number.isFinite(next.snapshotInterval) || next.snapshotInterval < .05) throw new Error('Snapshot interval must be at least 0.05 seconds');
     if (!Number.isFinite(next.styleInterval) || next.styleInterval <= 0) throw new Error('Style interval must be positive');
+    if (!['raf', 'native'].includes(next.frameDriver)) throw new Error('Frame driver must be raf or native');
     if (typeof next.collectMetrics !== 'boolean') throw new Error('collectMetrics must be boolean');
     next.colour = next.colour.slice();
     return next;
