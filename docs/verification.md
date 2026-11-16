@@ -91,7 +91,46 @@ persistent settings stayed unchanged. This check submitted no display drawables
 and does not prove that the second physical display renders. Seven CTest checks
 also passed. Full-screen verification is left to the user.
 
-## Windows
+## Version 0.1.4 options and particle investigation
+
+Both native versions add a version label in the options panel, light/dark
+sky-and-grid presets and a loop-only snapshot interval. The interval defaults to
+0.5 seconds and accepts finite values from 0.05 to 60 seconds. Latest mode uses
+incoming snapshots without that playback delay. Existing light/solid choices
+remain compatible. Zoom was explicitly deferred by the user and is unchanged.
+
+On macOS, nine CTest checks passed, including real offscreen Metal draws at
+default/custom interval boundaries, latest mode, invalid timing values and
+light/dark/solid pixel checks. The hidden module host checked the actual bundle's
+version label, interval control visibility and ten independent two-view lifecycle
+cycles. Persistent settings stayed unchanged. These checks do not activate the
+system saver or prove display presentation.
+
+Windows portable option/cadence checks passed. The x64 GUI executable rebuilt
+with the verified Zig 0.17.1 toolchain, and all four SPIR-V shaders passed
+validation. Both preview and saver binaries contain the 0.1.4 version label and
+are byte-identical. Windows UI layout, registry round-trip and runtime rendering
+of the new preset were not checked on the PC. The installed Mac bundle's hash
+and signature matched the tested build. The user retains the system display check.
+
+A bounded current-WU capture contained 4,454 atoms, 4,396 bonds and four snapshots.
+It included 121 unbonded atoms, while an earlier 4,163-atom capture had none.
+The current bonded framing radius was about 12.18; unbonded particles lay about
+29.6–305.7 from its centre. The protein-sized depth planes can clip those particles
+during rotation. A fixed-snapshot rotation produced short visibility segments,
+but did not reproduce a literal one-display-frame flash. Metal instance uploads
+wait for the preceding command; Vulkan uploads wait for the submission fence.
+No buffer race or malformed transform was established. Particle visibility,
+camera bounds and clipping are unchanged. Anonymised captures reduce unknown
+elements to material 999, so they do not identify the particles' chemical species.
+
+FAH's upstream viewer draws every supplied atom. Its dark/light UI themes are
+separate from its opaque animated sky shader. The new native presets remain
+inexpensive approximations. Sources: [viewer](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/Visualization.vue),
+[sky](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/viewer/sky.frag)
+and [dark theme](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/dark.styl).
+
+## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a
 checksum-verified temporary Zig toolchain. Options and projection/winding tests

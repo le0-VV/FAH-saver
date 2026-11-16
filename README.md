@@ -18,7 +18,7 @@ their limits.
 | Initial platforms | macOS and Windows. Keep a future Linux version possible. |
 | Connections | Local host, LAN and remote access through Tailscale. |
 | Data source limit | Keep FAH's 25 MB visualisation cache limit for now. No companion collector. |
-| Loop playback | Loop all available visualisation snapshots of the selected current WU. |
+| Loop playback | Loop all available visualisation snapshots of the selected current WU, with a configurable interval (default 0.5 seconds). |
 | Latest playback | Display the latest snapshot and update when another snapshot arrives. |
 | Model styles | The current FAH viewer's three styles: space-filling, ball-and-stick and sticks. |
 | Style selection | Keep one style, cycle through all three, or select styles at random. |
@@ -79,7 +79,7 @@ running while viewing. This route needs existing SSH access; it does not change
 FAH's listener. A direct private LAN or Tailscale connection is also supported
 when FAH is already configured to accept that connection.
 See the [direct-access setup](docs/direct-access.md) for listener, access-rule
-and Windows firewall requirements. macOS 0.1.2 uses explicit direct source routing and
+and Windows firewall requirements. macOS 0.1.2 and later use explicit direct source routing and
 reports HTTP upgrade errors explicitly.
 
 Capture only protein topology and coordinates for a repeatable rendering test:
@@ -101,15 +101,25 @@ specified. A fixed WU selection never silently switches to another WU.
 
 The current FAH viewer creates a sky and grid scene. It does not use a plain
 black scene as its only background. Use that scene as the visual reference.
-The implemented options are a cheap sky/grid approximation and a solid colour
-chosen by the user. The atmospheric FAH sky shader is not reproduced. Sky/grid
-is the prototype default.
+The implemented options are light and dark sky/grid approximations and a solid
+colour chosen by the user. The atmospheric FAH sky shader is not reproduced.
+Light sky/grid remains the default. The options panel shows the loaded saver
+version in its lower-left corner.
 
-Camera rotation is 0.2 radians per second. Snapshot playback advances ten
-snapshots per second in loop mode. Styles change every ten seconds in cycle or
-random mode. These timings are prototype defaults. All three model styles frame
+Camera rotation is 0.2 radians per second. Loop playback advances a snapshot every
+0.5 seconds by default; its interval accepts 0.05–60 seconds. Latest mode updates
+when FAH supplies a snapshot and ignores the loop interval. Styles change every
+ten seconds in cycle or random mode. All three model styles frame
 the bonded structure consistently; isolated atoms remain in the scene but can
 lie outside the camera view. See the [capture conventions](docs/capture-format.md).
+
+FAH's web UI has dark and light CSS themes, while its 3D sky uses a separate
+animated atmospheric shader. These native background presets are inexpensive
+approximations, rather than exact copies of that sky. See the upstream
+[theme](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/dark.styl)
+and [sky](https://github.com/FoldingAtHome/fah-web-client-bastet/blob/c54888af2a261d79270a390f289a4972965cedb4/src/viewer/Sky.js)
+sources. Historical browser comparison runs use a 0.1-second loop interval; set
+`--snapshot-interval 0.1` on native previews when repeating that comparison.
 
 ## Verified upstream behaviour
 
