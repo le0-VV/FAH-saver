@@ -14,7 +14,8 @@ struct SourceOptions {
 };
 
 struct SourceEvent {
-    // Reset clears the displayed model on WU change, reconnect or disconnection.
+    // Reset invalidates live topology/history. A screensaver may retain its last
+    // complete cached model until valid live data replaces it.
     enum class Kind { Reset, Topology, Frame, Status, Error };
     Kind kind = Kind::Status;
     std::string unit;
