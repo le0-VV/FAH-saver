@@ -269,6 +269,50 @@ handling and field-error geometry. The installed hash/signature matched the
 final build. Windows GUI artifacts cross-built with field-local errors; native
 Windows GUI interaction remains untested.
 
+## Version 0.1.8 latest-mode startup and further graphics cleanup
+
+FAH 8.5.6 publishes `units[index].frames = N` before sending coordinate index
+`N - 1`. A cold `viz` request still starts at zero to obtain topology; the API has
+no cold latest-only flag or replay-end packet. SourceOptions now has an opt-in
+latestOnly flag. SourceSession validates historical packets but withholds Frame
+callbacks below the selected WU's currently published tail. Both native latest
+hosts and live previews opt in; loop/capture callers retain full delivery. The
+cache remains visible until an eligible complete live frame arrives. There is
+no timer-based catch-up guess. Removed count metadata becomes unknown; coordinates
+without a positive watermark fail explicitly rather than falling back to replay.
+Sources: [FAH Remote](https://github.com/FoldingAtHome/fah-client-bastet/blob/93b96817a82ade9769fba3571ac697788f13357a/src/fah/client/Remote.cpp),
+[Unit](https://github.com/FoldingAtHome/fah-client-bastet/blob/93b96817a82ade9769fba3571ac697788f13357a/src/fah/client/Unit.cpp).
+
+All 15 integrated checks passed. A bounded live latest-only probe delivered one
+callback starting at index 96, rather than replaying indices from zero. An earlier
+three-second latest probe ended before any eligible frame, so catch-up can take
+longer than that short probe's deadline. A subsequent comparison encountered a
+new WU with one frame, for which both modes correctly delivered index zero.
+Native Windows synthetic protocol checks passed with exit zero and empty stderr.
+
+The user's new memory report was confirmed in PID 22934: 666.5 MB footprint,
+900.3 MB peak, four saver/renderer/Metal/layer/source objects and only 10.9 MB of
+allocated malloc memory. The report was therefore not a single model-history
+allocation. After the user's Settings-preview start/stop, the same four objects
+remained at 677.8 MB. This did not establish normal idle or lock/sleep behaviour.
+Only a start notification was captured; shutdown notification delivery was not
+established by that observation.
+
+A retained-window probe found that closing its window could leave a view running
+without a hide/detach callback. The saver now observes its actual window's public
+will-close notification and stops that view. Apple-family GPUs also use memoryless
+D32 depth for the existing clear/discard single-pass attachment; other supported
+GPUs keep private D32 depth. Full resolution, depth precision and colour buffer
+count are unchanged. All three styles produced byte-identical 960x600 reference
+PNGs versus private-depth rendering, with no GPU errors.
+
+The installed 0.1.8 (10) hash/signature matched the tested build. A fresh active
+host had one renderer and a 163.6 MB footprint, with 2.8 MB of owned graphics
+allocations. A lower fresh-process reading does not prove that every retained
+host path or longer-session growth is fixed. Options showed the correct version
+and Follow Latest, without changing saved settings. The user retains full-screen
+and longer-session visual acceptance.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a

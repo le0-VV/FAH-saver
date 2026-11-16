@@ -38,6 +38,10 @@ snapshot. A complete live snapshot replaces it. The cache does not extend FAH's
 25 MB visualisation history limit. The first successful live connection fills
 the cache; without a valid cache, the saver shows its normal connection status.
 
+Follow Latest withholds historical startup frames until it reaches the selected
+WU's published latest frame. The cached stand-in remains visible during catch-up.
+Loop mode still receives the complete available history.
+
 There is no manual capture-file selector in the screensaver options. The capture
 and preview command-line tools remain available for development and repeatable
 rendering checks.
