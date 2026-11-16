@@ -308,7 +308,7 @@ struct App : std::enable_shared_from_this<App> {
         const auto capture = fah::readCapture(options.capture);
         injection = "(()=>{if(window.top!==window)return;window.nativeCapture=JSON.parse("+
             Json(fah::writeCapture(capture)).dump()+");window.webkit={messageHandlers:{benchmark:{postMessage:r=>chrome.webview.postMessage(r)}}};})();";
-        const auto html = std::filesystem::absolute(std::filesystem::u8path(options.html));
+        const auto html = std::filesystem::absolute(std::filesystem::u8path(options.html)).lexically_normal();
         if (!std::filesystem::is_regular_file(html)) throw std::runtime_error("Benchmark HTML file does not exist");
         std::wstring uri(131072,L'\0'); DWORD characters = DWORD(uri.size());
         require(UrlCreateFromPathW(html.c_str(),uri.data(),&characters,0),"Create local HTML URL"); uri.resize(wcslen(uri.c_str()));
@@ -444,9 +444,11 @@ LRESULT CALLBACK windowProcedure(HWND window,UINT message,WPARAM wparam,LPARAM l
 int run(std::vector<std::string> arguments) {
     auto app = std::make_shared<App>();
     app->options = fah::web_benchmark::parse(arguments);
+    if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) &&
+        !AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(),DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+        throw std::runtime_error("Cannot enable physical-pixel DPI awareness");
     require(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED),"Initialise COM STA");
     struct Apartment { ~Apartment() { CoUninitialize(); } } apartment;
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     WNDCLASSW type{}; type.lpfnWndProc = windowProcedure; type.hInstance = GetModuleHandleW(nullptr);
     type.lpszClassName = L"FAHWebView2Benchmark"; type.hCursor = LoadCursorW(nullptr,IDC_ARROW);
     if (!RegisterClassW(&type)) throw std::runtime_error("Cannot register benchmark window");
