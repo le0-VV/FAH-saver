@@ -1,3 +1,12 @@
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#ifndef NTDDI_VERSION
+#define NTDDI_VERSION 0x0A000005
+#endif
+#endif
+
 #include "fah/SnapshotCache.hpp"
 
 #include <atomic>
@@ -5,6 +14,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <mutex>
@@ -119,7 +129,8 @@ void atomicWrite(const std::filesystem::path& path, const std::string& data) {
         temporary = path;
         temporary += L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." +
                      std::to_wstring(nextTemporary.fetch_add(1));
-        file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+        file = CreateFileW(temporary.c_str(), GENERIC_WRITE | DELETE,
+                           FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_NEW,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file != INVALID_HANDLE_VALUE) break;
         const DWORD code = GetLastError();
@@ -132,10 +143,23 @@ void atomicWrite(const std::filesystem::path& path, const std::string& data) {
             throw ioError("write", GetLastError());
         if (written != data.size()) throw std::runtime_error("Snapshot cache write was incomplete");
         if (!FlushFileBuffers(file)) throw ioError("flush", GetLastError());
+
+        std::error_code pathError;
+        const auto target = std::filesystem::absolute(path, pathError).wstring();
+        if (pathError) throw ioError("target path resolution", pathError.value());
+        const std::size_t nameBytes = target.size() * sizeof(wchar_t);
+        const std::size_t infoBytes = sizeof(FILE_RENAME_INFO) + nameBytes;
+        std::unique_ptr<FILE_RENAME_INFO, decltype(&std::free)> renameInfo(
+            static_cast<FILE_RENAME_INFO*>(std::calloc(1, infoBytes)), &std::free);
+        if (!renameInfo) throw std::bad_alloc();
+        // Preserve open readers of the old snapshot while publishing the new file.
+        renameInfo->Flags = FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS;
+        renameInfo->FileNameLength = static_cast<DWORD>(nameBytes);
+        std::memcpy(renameInfo->FileName, target.data(), nameBytes);
+        if (!SetFileInformationByHandle(file, FileRenameInfoEx, renameInfo.get(), static_cast<DWORD>(infoBytes)))
+            throw ioError("replacement", GetLastError());
         if (!CloseHandle(file)) { file = INVALID_HANDLE_VALUE; throw ioError("close", GetLastError()); }
         file = INVALID_HANDLE_VALUE;
-        if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-            throw ioError("replacement", GetLastError());
     } catch (...) {
         if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
         DeleteFileW(temporary.c_str());

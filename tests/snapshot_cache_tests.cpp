@@ -150,6 +150,25 @@ int main() {
         for (const auto& entry : std::filesystem::directory_iterator(file.parent_path()))
             check(entry.path() == file, "Failed write left a temporary file behind");
 
+#ifdef _WIN32
+        stage = "held reader and atomic replacement";
+        HANDLE oldReader = CreateFileW(file.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(oldReader != INVALID_HANDLE_VALUE, "Could not hold the previous snapshot open");
+        try {
+            cache.queue(topology(), frame(5));
+            cache.flush();
+            checkSnapshot(cache.load(), 5);
+            std::string previous(beforeIOFailure.size(), '\0');
+            DWORD received = 0;
+            check(ReadFile(oldReader, previous.data(), static_cast<DWORD>(previous.size()), &received, nullptr) &&
+                  received == previous.size() && previous == beforeIOFailure,
+                  "Replacement invalidated the held previous-snapshot reader");
+        } catch (...) { CloseHandle(oldReader); throw; }
+        check(CloseHandle(oldReader), "Could not close the held previous snapshot");
+#endif
+
         stage = "concurrent reader and atomic replacement";
         std::atomic<bool> reading{true};
         std::atomic<unsigned> readCount{0};
