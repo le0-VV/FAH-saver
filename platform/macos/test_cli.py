@@ -17,8 +17,8 @@ cases = [
     (["--capture", "unused", "--warmup", "NaN"], "Invalid warm-up duration"),
     (["--capture", "unused", "--snapshot-interval", "0"], "Snapshot interval must be"),
     (["--capture", "unused", "--snapshot-interval", "0.049"], "Snapshot interval must be"),
-    (["--capture", "unused", "--snapshot-interval", "60.001"], "Snapshot interval must be"),
     (["--capture", "unused", "--snapshot-interval", "NaN"], "Invalid snapshot interval"),
+    (["--capture", "unused", "--snapshot-interval", "inf"], "Invalid snapshot interval"),
     (["--capture", "unused", "--snapshot-interval", "0.5junk"], "Invalid snapshot interval"),
     (["--capture", "unused", "--width", "4097"], "Drawable dimensions must be whole numbers"),
     (["--capture", "unused", "--style", "0"], "Style must be"),
@@ -33,4 +33,8 @@ cases = [
 for args, expected in cases:
     result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=10)
     assert result.returncode == 1 and expected in result.stderr, (args, result.returncode, result.stderr)
+for interval in ("60.001", "600", "1e100"):
+    result = subprocess.run([binary, "--capture", "unused", "--snapshot-interval", interval,
+                             "--warmup", "-1"], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1 and "Warm-up duration must be" in result.stderr, (interval, result.stderr)
 print(f"CLI help and {len(cases)} input boundary checks passed.")

@@ -2,12 +2,45 @@
 #import <os/log.h>
 #include "fah/LiveModel.hpp"
 #include "fah/SnapshotCache.hpp"
+#include "fah/DecimalInput.hpp"
 
 #include <memory>
 #include <cmath>
 #include <string>
 
 static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
+
+@interface FAHDecimalFormatter : NSFormatter
+@end
+@implementation FAHDecimalFormatter
+- (NSString *)stringForObjectValue:(id)value {
+    if ([value isKindOfClass:NSString.class]) return value;
+    if ([value isKindOfClass:NSNumber.class])
+        return [NSString stringWithUTF8String:fah::decimalText([value doubleValue]).c_str()];
+    return nil;
+}
+- (BOOL)getObjectValue:(id *)value forString:(NSString *)text errorDescription:(NSString **)error {
+    // Save validates the range; unfinished decimal text must not trigger AppKit's error dialog.
+    if (value) *value = text;
+    return YES;
+}
+- (BOOL)isPartialStringValid:(NSString **)text proposedSelectedRange:(NSRangePointer)selection
+             originalString:(NSString *)original originalSelectedRange:(NSRange)originalSelection
+           errorDescription:(NSString **)error {
+    if (text && fah::decimalPartial((*text).UTF8String ?: "")) return YES;
+    if (text) *text = original;
+    if (selection) *selection = originalSelection;
+    if (error) *error = @"Use digits and one decimal point.";
+    return NO;
+}
+@end
+
+@interface FAHSaverView () <NSTextFieldDelegate>
+@end
+
+static NSString *editingText(NSTextField *field) {
+    return field.currentEditor ? field.currentEditor.string : field.stringValue;
+}
 
 static std::filesystem::path defaultCachePath() {
     NSURL *directory = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
@@ -36,7 +69,7 @@ static void cacheError(const std::string& message) {
     NSUInteger _sourceGeneration, _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_playback, *_style, *_background;
-    NSTextField *_sourceURL, *_unit, *_fps, *_snapshotInterval, *_snapshotIntervalUnit;
+    NSTextField *_sourceURL, *_unit, *_fps, *_snapshotInterval, *_snapshotIntervalUnit, *_optionsError;
     NSColorWell *_colour;
 }
 
@@ -61,7 +94,7 @@ static void cacheError(const std::string& message) {
     _defaults = preferences ? preferences : [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
     [_defaults registerDefaults:@{ @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
         @"loop": @NO, @"style": @0, @"fps": @60,
-        @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @.5,
+        @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @1,
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
     _renderer = [[FAHRenderer alloc] initWithDevice:MTLCreateSystemDefaultDevice() error:&error];
@@ -268,16 +301,22 @@ static void cacheError(const std::string& message) {
     };
     label(@"Source URL",280); _sourceURL = text([self sourceURL],280);
     _sourceURL.accessibilityLabel = @"Folding@home source URL";
+    _sourceURL.delegate = self;
     label(@"WU ID (optional)",245); _unit = text([_defaults stringForKey:@"unit"],245);
     _unit.accessibilityLabel = @"Optional work unit ID";
     label(@"Snapshots",210); _playback = popup(@[@"Follow latest", @"Loop available frames"],210);
     _playback.frame = NSMakeRect(170,210,200,26);
     [_playback selectItemAtIndex:[_defaults boolForKey:@"loop"] ? 1 : 0];
     _playback.target = self; _playback.action = @selector(updatePlaybackControls:);
-    _snapshotInterval = text([[_defaults objectForKey:@"snapshotInterval"] stringValue],210);
+    const double savedInterval = [_defaults doubleForKey:@"snapshotInterval"];
+    _snapshotInterval = text(std::isfinite(savedInterval) && savedInterval >= 0 ?
+        [NSString stringWithUTF8String:fah::decimalText(savedInterval).c_str()] : @"",210);
     _snapshotInterval.frame = NSMakeRect(380,210,65,24);
     _snapshotInterval.accessibilityLabel = @"Seconds between snapshots";
-    _snapshotInterval.toolTip = @"0.05–60 seconds between snapshots. This does not change the display frame rate.";
+    _snapshotInterval.toolTip = @"At least 0.05 seconds between snapshots. This does not change the display frame rate.";
+    _snapshotInterval.formatter = [FAHDecimalFormatter new];
+    _snapshotInterval.delegate = self;
+    _snapshotInterval.cell.scrollable = YES;
     _snapshotIntervalUnit = [NSTextField labelWithString:@"seconds/frame"];
     _snapshotIntervalUnit.frame = NSMakeRect(450,210,110,24); [content addSubview:_snapshotIntervalUnit];
     [self updatePlaybackControls:nil];
@@ -286,6 +325,7 @@ static void cacheError(const std::string& message) {
     label(@"Frame-rate limit",140); _fps = text([[_defaults objectForKey:@"fps"] stringValue],140);
     _fps.frame = NSMakeRect(170,140,90,24);
     _fps.accessibilityLabel = @"Frame-rate limit in frames per second";
+    _fps.delegate = self;
     NSTextField *unitLabel = [NSTextField labelWithString:@"fps (1–240)"];
     unitLabel.frame = NSMakeRect(270,140,140,24); [content addSubview:unitLabel];
     label(@"Background",105); _background = popup(@[@"Light sky and grid",@"Dark sky and grid",@"Solid colour"],105);
@@ -298,6 +338,15 @@ static void cacheError(const std::string& message) {
     _background.accessibilityLabel = @"Background";
     _colour.accessibilityLabel = @"Solid background colour";
     [content addSubview:_colour];
+    _optionsError = [NSTextField wrappingLabelWithString:@""];
+    _optionsError.frame = NSMakeRect(20,58,535,36);
+    _optionsError.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    _optionsError.textColor = NSColor.systemRedColor;
+    _optionsError.accessibilityLabel = @"Options validation error";
+    _optionsError.hidden = YES;
+    [content addSubview:_optionsError];
+    if (!std::isfinite(savedInterval) || savedInterval < .05)
+        [self showOptionsError:@"Saved interval is invalid. Enter at least 0.05 seconds." field:_snapshotInterval];
     NSBundle *module = [NSBundle bundleForClass:FAHSaverView.class];
     NSString *version = [module objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
     NSString *build = [module objectForInfoDictionaryKey:@"CFBundleVersion"];
@@ -320,29 +369,54 @@ static void cacheError(const std::string& message) {
     _snapshotInterval.hidden = !loop;
     _snapshotInterval.enabled = loop;
     _snapshotIntervalUnit.hidden = !loop;
+    if (!loop && _snapshotInterval.currentEditor) [_sheet makeFirstResponder:_playback];
+    [self clearOptionsError];
+}
+
+- (void)clearOptionsError {
+    _optionsError.stringValue = @"";
+    _optionsError.hidden = YES;
+}
+
+- (void)showOptionsError:(NSString *)message field:(NSTextField *)field {
+    _optionsError.stringValue = message;
+    _optionsError.hidden = NO;
+    [_sheet makeFirstResponder:field];
+}
+
+- (void)controlTextDidChange:(NSNotification *)notification { [self clearOptionsError]; }
+- (void)control:(NSControl *)control didFailToValidatePartialString:(NSString *)text errorDescription:(NSString *)error {
+    if (control == _snapshotInterval) [self showOptionsError:@"Use digits and one decimal point." field:_snapshotInterval];
 }
 
 - (void)saveOptions:(id)sender {
-    NSScanner *scanner = [NSScanner scannerWithString:_fps.stringValue];
+    NSScanner *scanner = [NSScanner scannerWithString:editingText(_fps)];
     NSInteger fps;
     BOOL valid = [scanner scanInteger:&fps] && scanner.isAtEnd && fps >= 1 && fps <= 240;
     NSString *problem = valid ? nil : @"Enter a whole frame-rate limit from 1 to 240 fps.";
+    NSTextField *problemField = _fps;
     double interval = [_defaults doubleForKey:@"snapshotInterval"];
     if (!problem && _playback.indexOfSelectedItem == 1) {
-        NSScanner *intervalScanner = [NSScanner scannerWithString:_snapshotInterval.stringValue];
+        NSString *intervalText = editingText(_snapshotInterval);
+        NSScanner *intervalScanner = [NSScanner scannerWithString:intervalText];
         intervalScanner.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-        if (![intervalScanner scanDouble:&interval] || !intervalScanner.isAtEnd ||
-            !std::isfinite(interval) || interval < .05 || interval > 60)
-            problem = @"Enter a snapshot interval from 0.05 to 60 seconds.";
+        if (!fah::decimalPartial(intervalText.UTF8String ?: "") || ![intervalScanner scanDouble:&interval] ||
+            !intervalScanner.isAtEnd || !std::isfinite(interval) || interval < .05) {
+            problem = @"Enter at least 0.05 seconds using digits and one decimal point.";
+            problemField = _snapshotInterval;
+        }
     }
     if (!problem) {
-        NSURL *url = [NSURL URLWithString:_sourceURL.stringValue];
-        if (!url.host.length || !([url.scheme isEqualToString:@"ws"] || [url.scheme isEqualToString:@"wss"]))
+        NSURL *url = [NSURL URLWithString:editingText(_sourceURL)];
+        if (!url.host.length || !([url.scheme isEqualToString:@"ws"] || [url.scheme isEqualToString:@"wss"])) {
             problem = @"Enter a WebSocket source URL beginning with ws:// or wss://.";
+            problemField = _sourceURL;
+        }
     }
-    if (problem) { NSAlert *alert = [NSAlert new]; alert.messageText = problem; [alert runModal]; return; }
-    [_defaults setObject:_sourceURL.stringValue forKey:@"sourceURL"];
-    [_defaults setObject:_unit.stringValue forKey:@"unit"];
+    if (problem) { [self showOptionsError:problem field:problemField]; return; }
+    [self clearOptionsError];
+    [_defaults setObject:editingText(_sourceURL) forKey:@"sourceURL"];
+    [_defaults setObject:editingText(_unit) forKey:@"unit"];
     [_defaults setBool:_playback.indexOfSelectedItem == 1 forKey:@"loop"];
     [_defaults setDouble:interval forKey:@"snapshotInterval"];
     [_defaults setInteger:_style.indexOfSelectedItem forKey:@"style"];

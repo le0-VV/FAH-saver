@@ -31,8 +31,9 @@ Example commands, using paths from the parent build directory:
 ```
 
 Use `--style cycle` or `--style random` for timed style changes. The provisional
-style interval is 10 seconds. Loop playback defaults to a snapshot every 0.5
-seconds; `--snapshot-interval 0.05..60` changes that interval. Latest mode ignores
+style interval is 10 seconds. Loop playback defaults to a snapshot every 1
+second; `--snapshot-interval SECONDS` accepts finite values of at least 0.05
+seconds, with no upper limit. Latest mode ignores
 the loop clock. Use `--snapshot-interval 0.1` to repeat the historical browser
 comparison with its original cadence.
 The user frame-rate limit does not alter snapshot cadence. `--unit ID` selects a
@@ -62,7 +63,10 @@ updates. Per-display-frame work updates camera uniforms and submits draw calls.
 The native options sheet selects a live source URL, optional WU ID,
 latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a light
 sky/grid, dark sky/grid or solid-colour background. The loop interval field is
-visible only in loop mode and defaults to 0.5 seconds. `--background sky|dark|solid`
+visible only in loop mode and defaults to 1 second for new settings. Existing
+explicit values are preserved. The field accepts ASCII digits and one decimal
+point, including unfinished text while editing. Invalid values keep the panel
+open with a small inline error; no modal alert is used. `--background sky|dark|solid`
 selects these backgrounds in the preview. The panel's lower-left corner shows
 the version and build of the loaded saver bundle. Options use ScreenSaverDefaults.
 Starting and stopping the saver starts and stops its native source. The retired

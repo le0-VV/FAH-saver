@@ -16,7 +16,7 @@ struct FAHRenderOptions {
     bool sky = true;
     bool darkSky = false;
     fah::Vec3 colour = {0.02f, 0.025f, 0.035f};
-    double snapshotInterval = 0.5;
+    double snapshotInterval = 1;
     double styleInterval = 10;
     bool collectMetrics = false;
 };

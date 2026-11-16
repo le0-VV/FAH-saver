@@ -161,7 +161,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
 
 - (void)setOptions:(const FAHRenderOptions&)options {
     if (options.fps < 1 || options.fps > 240 || !std::isfinite(options.snapshotInterval) ||
-        options.snapshotInterval < .05 || options.snapshotInterval > 60 ||
+        options.snapshotInterval < .05 ||
         !std::isfinite(options.styleInterval) || options.styleInterval <= 0)
         throw std::runtime_error("Invalid render timing settings");
     const int style = static_cast<int>(options.style);

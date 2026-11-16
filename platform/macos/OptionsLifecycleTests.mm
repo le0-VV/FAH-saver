@@ -2,9 +2,11 @@
 #import <ScreenSaver/ScreenSaver.h>
 #import "FAHSaverView.h"
 #include "TestSource.hpp"
+#include "fah/DecimalInput.hpp"
 
 #include <cstdio>
 #include <stdexcept>
+#include <limits>
 
 static void check(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
@@ -15,6 +17,25 @@ static NSView *namedControl(NSView *root, NSString *name) {
     for (NSView *child in root.subviews)
         if (NSView *found = namedControl(child,name)) return found;
     return nil;
+}
+
+static NSButton *namedButton(NSWindow *sheet, NSString *title) {
+    for (NSView *child in sheet.contentView.subviews)
+        if ([child isKindOfClass:NSButton.class] && [[(NSButton *)child title] isEqualToString:title])
+            return (NSButton *)child;
+    throw std::runtime_error("Options dismissal button is missing");
+}
+
+static void sendButton(NSWindow *sheet, NSString *title) {
+    NSButton *button = namedButton(sheet,title);
+    check([NSApp sendAction:button.action to:button.target from:button],"Options action was not handled");
+}
+
+static void waitForSheet(bool &ended) {
+    const auto deadline = [NSDate dateWithTimeIntervalSinceNow:1];
+    while (!ended && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    check(ended,"Options sheet did not finish dismissal");
 }
 
 struct TestPreferences {
@@ -42,6 +63,30 @@ int main(int argc, const char *argv[]) {
             auto factory = fixtureSource(std::make_shared<const fah::Capture>(fah::readCapture(argv[2])));
             FAHSaverView *view = [[principal alloc] initWithFrame:NSMakeRect(0,0,320,240)
                 isPreview:YES preferences:preferences.defaults cachePath:cache.file() sourceFactory:factory];
+            NSTextField *initialInterval = (NSTextField *)namedControl(view.configureSheet.contentView,@"Seconds between snapshots");
+            check(initialInterval.doubleValue == 1,"New settings did not default to one second");
+            NSFormatter *formatter = initialInterval.formatter;
+            check(formatter != nil,"Interval edit formatter is missing");
+            for (NSString *text in @[@"",@".",@"0.",@".5",@"120",@"1.25"]) {
+                NSString *candidate = text;
+                NSRange selection = NSMakeRange(candidate.length,0);
+                check([formatter isPartialStringValid:&candidate proposedSelectedRange:&selection
+                    originalString:@"1" originalSelectedRange:NSMakeRange(1,0) errorDescription:nil],
+                    "Valid partial decimal text was rejected");
+            }
+            for (NSString *text in @[@"1e3",@"12abc",@"1..2",@"-1",@"+1",@"1,5",@" 1",@"１",@"١"]) {
+                NSString *candidate = text;
+                NSRange selection = NSMakeRange(candidate.length,0);
+                check(![formatter isPartialStringValid:&candidate proposedSelectedRange:&selection
+                    originalString:@"1.25" originalSelectedRange:NSMakeRange(2,0) errorDescription:nil] &&
+                    [candidate isEqualToString:@"1.25"] && NSEqualRanges(selection,NSMakeRange(2,0)),
+                    "Invalid typing/paste was not rejected as a whole edit");
+            }
+            for (NSString *text in @[@"",@"."]) {
+                id object = nil;
+                check([formatter getObjectValue:&object forString:text errorDescription:nil] && [object isEqual:text],
+                      "Partial text would trigger a formatter commit alert");
+            }
             NSWindow *parent = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,640,480)
                 styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
             parent.releasedWhenClosed = NO;
@@ -64,7 +109,7 @@ int main(int argc, const char *argv[]) {
                           !namedControl(sheet.contentView,@"Protein source type"),"Capture-file controls remain in Options");
                     [playback selectItemAtIndex:1];
                     [NSApp sendAction:playback.action to:playback.target from:playback];
-                    const double seconds = .5 + .25*cycle;
+                    const double seconds = 1 + .25*cycle;
                     interval.doubleValue = seconds;
                     const NSInteger selection = cycle%3;
                     [background selectItemAtIndex:selection];
@@ -75,16 +120,8 @@ int main(int argc, const char *argv[]) {
                         ended = true;
                     }];
                     check(sheet.sheetParent == parent,"Options sheet did not attach to its host");
-                    NSButton *button = nil;
-                    for (NSView *child in sheet.contentView.subviews)
-                        if ([child isKindOfClass:NSButton.class] &&
-                            [[(NSButton *)child title] isEqualToString:save ? @"Save" : @"Cancel"])
-                            button = (NSButton *)child;
-                    check(button != nil,"Options dismissal button is missing");
-                    check([NSApp sendAction:button.action to:button.target from:button],"Options action was not handled");
-                    const auto deadline = [NSDate dateWithTimeIntervalSinceNow:1];
-                    while (!ended && deadline.timeIntervalSinceNow > 0)
-                        [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+                    sendButton(sheet,save ? @"Save" : @"Cancel");
+                    waitForSheet(ended);
                     check(ended && !sheet.sheetParent && !parent.attachedSheet,"Options sheet did not finish dismissal");
                     check(sheet.alphaValue == 0 && parent.alphaValue == 0 && !view.hasActiveSource,
                           "Hidden options test exposed a window or source");
@@ -102,6 +139,64 @@ int main(int argc, const char *argv[]) {
                     }
                     [sheet close];
                 }
+            }
+            NSWindow *sheet = view.configureSheet;
+            sheet.alphaValue = 0; sheet.ignoresMouseEvents = YES;
+            NSTextField *inlineError = (NSTextField *)namedControl(sheet.contentView,@"Options validation error");
+            NSTextField *interval = (NSTextField *)namedControl(sheet.contentView,@"Seconds between snapshots");
+            NSPopUpButton *playback = (NSPopUpButton *)namedControl(sheet.contentView,@"Snapshot playback");
+            check(inlineError && interval && playback,"Inline interval controls are missing");
+            [playback selectItemAtIndex:1];
+            [NSApp sendAction:playback.action to:playback.target from:playback];
+            __block bool correctedSaveEnded = false;
+            [parent beginSheet:sheet completionHandler:^(NSModalResponse response) { correctedSaveEnded = response == NSModalResponseOK; }];
+            const auto beforeInvalid = [preferences.defaults persistentDomainForName:preferences.name];
+            auto reject = [&](NSTextField *field, NSString *text) {
+                [sheet makeFirstResponder:nil]; field.stringValue = text;
+                const auto modal = NSApp.modalWindow;
+                sendButton(sheet,@"Save");
+                check(sheet.sheetParent == parent && !sheet.attachedSheet && NSApp.modalWindow == modal,
+                      "Invalid input opened a modal alert or closed the options sheet");
+                check(!inlineError.hidden && inlineError.stringValue.length &&
+                      [beforeInvalid isEqual:[preferences.defaults persistentDomainForName:preferences.name]],
+                      "Invalid input changed saved settings or lacked inline feedback");
+                check([field.stringValue isEqualToString:text] && field.currentEditor == sheet.firstResponder,
+                      "Invalid input or field focus was lost");
+            };
+            for (NSString *text in @[@"",@".",@"0",@"0.01",@"1e3",[@"9" stringByPaddingToLength:400 withString:@"9" startingAtIndex:0]])
+                reject(interval,text);
+            [playback selectItemAtIndex:0];
+            [NSApp sendAction:playback.action to:playback.target from:playback];
+            check(inlineError.hidden,"Changing playback did not clear inline feedback");
+            [playback selectItemAtIndex:1];
+            [NSApp sendAction:playback.action to:playback.target from:playback];
+            [sheet makeFirstResponder:nil]; interval.stringValue = @"600";
+            NSTextField *fps = (NSTextField *)namedControl(sheet.contentView,@"Frame-rate limit in frames per second");
+            reject(fps,@"1.5");
+            [sheet makeFirstResponder:nil]; fps.stringValue = @"60";
+            NSTextField *source = (NSTextField *)namedControl(sheet.contentView,@"Folding@home source URL");
+            NSString *originalSource = source.stringValue;
+            reject(source,@"file:///not-a-live-source");
+            [sheet makeFirstResponder:nil]; source.stringValue = originalSource;
+            [sheet makeFirstResponder:interval];
+            interval.currentEditor.string = @"600";
+            [NSNotificationCenter.defaultCenter postNotificationName:NSControlTextDidChangeNotification object:interval];
+            check(inlineError.hidden,"Editing did not clear the inline message");
+            sendButton(sheet,@"Save"); waitForSheet(correctedSaveEnded);
+            check([preferences.defaults doubleForKey:@"snapshotInterval"] == 600,"Corrected interval above 60 seconds did not save");
+            [sheet close];
+            for (double seconds : {.5, 1e100, std::numeric_limits<double>::max()}) {
+                [preferences.defaults setDouble:seconds forKey:@"snapshotInterval"];
+                NSWindow *reopened = view.configureSheet;
+                reopened.alphaValue = 0; reopened.ignoresMouseEvents = YES;
+                NSTextField *field = (NSTextField *)namedControl(reopened.contentView,@"Seconds between snapshots");
+                check(fah::decimalPartial(field.stringValue.UTF8String) && field.doubleValue == seconds,
+                      "Saved interval was changed or reopened with illegal exponent text");
+                __block bool ended = false;
+                [parent beginSheet:reopened completionHandler:^(NSModalResponse response) { ended = response == NSModalResponseOK; }];
+                sendButton(reopened,@"Save"); waitForSheet(ended);
+                check([preferences.defaults doubleForKey:@"snapshotInterval"] == seconds,"Large or explicit saved interval did not round-trip");
+                [reopened close];
             }
             [parent close];
             std::printf("Options lifecycle passed: %u saves, %u cancels, 20 sheet closures/reopens; isolated preferences\n",saves,cancels);

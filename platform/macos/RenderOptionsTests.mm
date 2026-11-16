@@ -35,8 +35,8 @@ int main(int argc, const char *argv[]) {
                 return [[renderer metrics] objectForKey:@"snapshot_index"];
             };
             FAHRenderOptions options;
-            check(options.snapshotInterval == .5, "Default snapshot interval is not 0.5 seconds");
-            for (double interval : {.5, 1.25}) {
+            check(options.snapshotInterval == 1, "Default snapshot interval is not 1 second");
+            for (double interval : {1.0, 1.25, 120.0}) {
                 options.loop = true; options.snapshotInterval = interval;
                 [renderer setOptions:options]; [renderer start];
                 for (const auto &sample : {std::pair<double,unsigned>{0,0}, {interval-.001,0},
@@ -50,14 +50,14 @@ int main(int argc, const char *argv[]) {
             check([draw(0) unsignedIntegerValue] == 1 && [draw(20) unsignedIntegerValue] == 1,
                   "Latest mode followed the loop clock");
             [renderer stop];
-            for (double interval : {0.0, .049, 60.001, std::numeric_limits<double>::infinity(),
+            for (double interval : {0.0, .049, std::numeric_limits<double>::infinity(),
                                     std::numeric_limits<double>::quiet_NaN()}) {
                 options.snapshotInterval = interval;
                 bool rejected = false;
                 try { [renderer setOptions:options]; } catch (const std::exception&) { rejected = true; }
                 check(rejected, "Invalid snapshot interval was accepted");
             }
-            for (double interval : {.05, 60.0}) {
+            for (double interval : {.05, 60.001, 600.0, 1e100, std::numeric_limits<double>::max()}) {
                 options.snapshotInterval = interval; [renderer setOptions:options];
             }
             options.sky = true; options.darkSky = false;

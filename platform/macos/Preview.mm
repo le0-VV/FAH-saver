@@ -61,7 +61,7 @@ int main(int argc, const char *argv[]) {
                     std::puts("FAH Metal preview/benchmark\n"
                         "  --capture PATH | --source ws://HOST:7396/api/websocket [--unit ID]\n"
                         "  --style 1|2|3|cycle|random --playback latest|loop --fps 1..240\n"
-                        "  --background sky|dark|solid --colour R,G,B --snapshot-interval 0.05..60\n"
+                        "  --background sky|dark|solid --colour R,G,B --snapshot-interval SECONDS (minimum 0.05)\n"
                         "  --warmup 0..120 --seconds N\n"
                         "  --width PIXELS --height PIXELS --offscreen --screenshot PATH\n"
                         "Offscreen mode reports GPU submissions, not displayed frame rate.\n"
@@ -79,8 +79,8 @@ int main(int argc, const char *argv[]) {
                 else if (flag == "--warmup") warmup = number(value,"warm-up duration");
                 else if (flag == "--snapshot-interval") {
                     options.snapshotInterval = number(value,"snapshot interval");
-                    if (options.snapshotInterval < .05 || options.snapshotInterval > 60)
-                        throw std::runtime_error("Snapshot interval must be between 0.05 and 60 seconds");
+                    if (options.snapshotInterval < .05)
+                        throw std::runtime_error("Snapshot interval must be at least 0.05 seconds");
                 }
                 else if (flag == "--fps") {
                     const double fps = number(value,"frame-rate limit");

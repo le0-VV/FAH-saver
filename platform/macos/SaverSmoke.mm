@@ -43,7 +43,7 @@ struct VolatilePreferences {
         arguments[@"fps"] = @60;
         arguments[@"style"] = @1;
         arguments[@"loop"] = @NO;
-        arguments[@"snapshotInterval"] = @.5;
+        arguments[@"snapshotInterval"] = @1;
         arguments[@"sky"] = @YES;
         [defaults setVolatileDomain:arguments forName:NSArgumentDomain];
     }
@@ -122,7 +122,7 @@ int main(int argc, const char *argv[]) {
                 throw std::runtime_error("Options do not show the loaded screensaver version");
             NSPopUpButton *playback = (NSPopUpButton *)namedControl(controls,@"Snapshot playback");
             NSTextField *interval = (NSTextField *)namedControl(controls,@"Seconds between snapshots");
-            if (!playback || !interval || !interval.hidden || interval.enabled || interval.doubleValue != .5)
+            if (!playback || !interval || !interval.hidden || interval.enabled || interval.doubleValue != 1)
                 throw std::runtime_error("Latest mode exposes the loop interval or has the wrong default");
             [playback selectItemAtIndex:1];
             [NSApp sendAction:playback.action to:playback.target from:playback];
