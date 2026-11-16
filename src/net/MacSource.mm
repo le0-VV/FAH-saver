@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <CFNetwork/CFNetwork.h>
+#import <os/log.h>
 #include "fah/Source.hpp"
 #include <algorithm>
 #include <atomic>
@@ -96,6 +97,8 @@ struct MacState : std::enable_shared_from_this<MacState> {
         else if (handshake)
             message += "Check the FAH endpoint, access rules and proxy routing.";
         else message += "Check the source connection.";
+        static os_log_t connectionLog = os_log_create("org.fahsaver.screensaver", "connection");
+        os_log_error(connectionLog, "%{public}s", message.c_str());
         return message;
     }
 
