@@ -108,8 +108,14 @@
       }
       const next = typeof value === 'string' ? parseCapture(value, liveLimits) : validateCapture(value, liveLimits);
       if (settings.playback === 'latest') next.frames = [next.frames[next.frames.length - 1]];
-      capture = next; engine.setCapture(capture); schedule();
-      return true;
+      const firstModel = !capture;
+      capture = next; engine.setCapture(capture);
+      if (running && firstModel) {
+        const timestamp = now();
+        draw(elapsedSeconds(timestamp, epoch), timestamp);
+        nextDue = timestamp + 1000 / settings.fps;
+      }
+      schedule(); return true;
     }
     function updateFrames(value, replace) {
       requireActive();

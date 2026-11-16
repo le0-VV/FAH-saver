@@ -113,6 +113,19 @@ function harness() {
 
 {
   const h = harness(), r = h.runtime;
+  r.start(); h.advance(1500);
+  const backgroundDraws = r.metrics().draws;
+  r.setCapture(fixture);
+  assert.equal(r.metrics().draws, backgroundDraws + 1, 'The first live model must draw without waiting for rAF');
+  assert.equal(r.metrics().elapsedSeconds, 1.5, 'The first live model keeps the existing startup epoch');
+  assert.equal(h.state.firstFrames, 1); assert.equal(h.queued.size, 1);
+  h.advance(0); assert.equal(r.metrics().draws, backgroundDraws + 1);
+  h.advance(20); assert.equal(r.metrics().elapsedSeconds, 1.52);
+  r.dispose();
+}
+
+{
+  const h = harness(), r = h.runtime;
   r.configure({playback: 'loop'}); r.setCapture(fixture); r.renderAt(.99);
   assert.equal(r.metrics().snapshotIndex, 0);
   r.renderAt(1); assert.equal(r.metrics().snapshotIndex, 1);
