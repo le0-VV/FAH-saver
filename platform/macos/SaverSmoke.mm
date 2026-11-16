@@ -97,7 +97,8 @@ int main(int argc, const char *argv[]) {
             Class principal = bundle.principalClass;
             if (!principal || ![principal isSubclassOfClass:ScreenSaverView.class])
                 throw std::runtime_error("Bundle principal class is not a ScreenSaverView");
-            const NSRect frame = fullscreen ? NSScreen.mainScreen.frame : NSMakeRect(0,0,320,240);
+            NSScreen *screen = NSScreen.mainScreen;
+            const NSRect frame = fullscreen ? screen.frame : NSMakeRect(0,0,320,240);
             NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:ModuleName];
             NSDictionary *persistentBefore = [defaults persistentDomainForName:ModuleName];
             VolatilePreferences preferences(defaults,capturePath);
@@ -109,13 +110,15 @@ int main(int argc, const char *argv[]) {
                 throw std::runtime_error("Volatile capture preferences were not applied");
             NSString *exitReason = @"ten_start_stop_cycles";
             NSString *screenshotError = nil;
-            double elapsed = 0;
+            double elapsed = 0, measuredSeconds = 0;
             NSUInteger frameCallbacks = 0;
+            NSDictionary *modelMetadata = nil;
             if (!fullscreen) {
                 for (int cycle=0; cycle<10; ++cycle) {
                     [view startAnimation];
                     if (view.hasActiveSource) throw std::runtime_error("Capture test unexpectedly started a network source");
-                    for (int index=0; index<3; ++index) { [view animateOneFrame]; ++frameCallbacks; }
+                    for (int index=0; index<3; ++index) [view animateOneFrame];
+                    modelMetadata = [view renderMetrics];
                     [view stopAnimation];
                     if (view.isAnimating || view.hasActiveSource) throw std::runtime_error("Saver did not stop");
                     [view animateOneFrame];
@@ -131,15 +134,17 @@ int main(int argc, const char *argv[]) {
                 const auto previousPresentation = NSApp.presentationOptions;
                 __block NSString *reason = nil;
                 __block NSString *imageError = nil;
-                __block NSUInteger callbacks = 0;
-                __block NSTimer *frameTimer = nil, *exitTimer = nil, *inputTimer = nil, *screenshotTimer = nil;
+                __block NSDictionary *exitMetadata = nil;
+                __block double measuredBegan = 0;
+                __block NSTimer *warmupTimer = nil, *exitTimer = nil, *inputTimer = nil, *screenshotTimer = nil;
                 void (^finish)(NSString *) = ^(NSString *why) {
                     if (reason) return;
                     reason = why;
-                    [frameTimer invalidate]; frameTimer = nil;
+                    [warmupTimer invalidate]; warmupTimer = nil;
                     [exitTimer invalidate]; exitTimer = nil;
                     [inputTimer invalidate]; inputTimer = nil;
                     [screenshotTimer invalidate]; screenshotTimer = nil;
+                    exitMetadata = [view renderMetrics];
                     [view stopAnimation];
                     [window orderOut:nil];
                     [NSApp stop:nil];
@@ -152,11 +157,11 @@ int main(int argc, const char *argv[]) {
                     object:NSApp queue:nil usingBlock:^(NSNotification * __unused note) { finish(@"application_deactivated"); }];
                 [view startAnimation];
                 if (view.hasActiveSource) throw std::runtime_error("Capture test unexpectedly started a network source");
-                frameTimer = [NSTimer timerWithTimeInterval:view.animationTimeInterval repeats:YES block:^(NSTimer * __unused timer) {
-                    [view animateOneFrame]; ++callbacks;
+                // ScreenSaverView.startAnimation already owns the drawing timer.
+                warmupTimer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer * __unused timer) {
+                    [view beginMeasurement];
+                    measuredBegan = CACurrentMediaTime();
                 }];
-                frameTimer.tolerance = .001;
-                [NSRunLoop.mainRunLoop addTimer:frameTimer forMode:NSRunLoopCommonModes];
                 exitTimer = [NSTimer scheduledTimerWithTimeInterval:5 repeats:NO block:^(NSTimer * __unused timer) { finish(@"five_second_autoexit"); }];
                 if (testInput) inputTimer = [NSTimer scheduledTimerWithTimeInterval:1.5 repeats:NO block:^(NSTimer * __unused timer) {
                     NSEvent *event = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
@@ -173,6 +178,7 @@ int main(int argc, const char *argv[]) {
                 const double began = CACurrentMediaTime();
                 [NSApp run];
                 elapsed = CACurrentMediaTime()-began;
+                measuredSeconds = measuredBegan > 0 ? CACurrentMediaTime()-measuredBegan : 0;
                 [NSNotificationCenter.defaultCenter removeObserver:observer];
                 window.inputHandler = nil;
                 [NSApp setPresentationOptions:previousPresentation];
@@ -184,20 +190,30 @@ int main(int argc, const char *argv[]) {
                     screenshotError = @"Window capture was not reached before exit.";
                 if (testInput && ![exitReason isEqualToString:@"key_input"])
                     throw std::runtime_error("The posted input did not exit through the key event path");
-                frameCallbacks = callbacks;
+                modelMetadata = exitMetadata;
                 if (view.isAnimating || view.hasActiveSource) throw std::runtime_error("Saver did not stop after full-screen exit");
                 if (elapsed > 7) throw std::runtime_error("Full-screen module host exceeded its exit bound");
             }
+            frameCallbacks = view.animationCallbackCount;
             const NSUInteger callbacksAfterStop = view.sourceCallbackCount;
+            NSDictionary *stoppedMetrics = [view renderMetrics];
             [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.1]];
             if (view.hasActiveSource || view.sourceCallbackCount != callbacksAfterStop)
                 throw std::runtime_error("Source activity continued after stop");
+            NSMutableDictionary *renderMetrics = [[view renderMetrics] mutableCopy];
+            if (![renderMetrics[@"submitted_frames"] isEqual:stoppedMetrics[@"submitted_frames"]])
+                throw std::runtime_error("GPU submissions continued after stop");
+            for (NSString *key in @[@"atom_count",@"bond_count",@"snapshot_count"])
+                if (modelMetadata[key]) renderMetrics[key] = modelMetadata[key];
             NSDictionary *persistentAfter = [defaults persistentDomainForName:ModuleName];
             if (persistentBefore != persistentAfter && ![persistentBefore isEqual:persistentAfter])
                 throw std::runtime_error("Persistent screensaver settings changed during the test");
             NSDictionary *result = @{ @"host": @"ScreenSaverView module host; not ScreenSaverEngine",
+                @"render_metrics": renderMetrics,
+                @"screen_id": screen.deviceDescription[@"NSScreenNumber"],
+                @"screen_scale": @(screen.backingScaleFactor),
                 @"fullscreen": @(fullscreen), @"exit_reason": exitReason, @"elapsed_seconds": @(elapsed),
-                @"frame_callbacks": @(frameCallbacks), @"synthetic_input_requested": @(testInput),
+                @"frame_callbacks": @(frameCallbacks), @"measured_seconds": @(measuredSeconds), @"synthetic_input_requested": @(testInput),
                 @"source_active_after_stop": @(view.hasActiveSource),
                 @"source_callbacks_before_drain": @(callbacksAfterStop), @"source_callbacks_after_drain": @(view.sourceCallbackCount),
                 @"persistent_settings_unchanged": @YES, @"screenshot_error": screenshotError ? screenshotError : @"" };

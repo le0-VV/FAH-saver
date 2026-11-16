@@ -84,7 +84,12 @@ For an explicitly authorised brief full-screen check:
   /path/to/capture.json --fullscreen --test-input
 ```
 
-The first form exits after five seconds or normal keyboard/mouse input. The
+The first form exits after five seconds or normal keyboard/mouse input. Its
+first second warms up the view; the remaining interval collects actual drawable
+presentation timestamps, GPU times and the physical drawable dimensions. The
+helper lets ScreenSaverView own its periodic animation timer and reports all
+callbacks from the real view. It does not add a second drawing timer. Submitted
+frame counts must remain unchanged during the post-stop event drain. The
 second posts Escape through the app's event queue after 1.5 seconds to exercise
 its input-exit path. Output identifies that synthetic input explicitly. Window
 capture is optional and reports unavailable recording permissions as an error

@@ -15,7 +15,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     std::unique_ptr<fah::Source> _source;
     std::shared_ptr<fah::Capture> _liveCapture;
     NSString *_connectionStatus;
-    NSUInteger _sourceCallbackCount;
+    NSUInteger _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_inputMode, *_playback, *_style, *_background;
     NSTextField *_sourceURL, *_unit, *_capturePath, *_fps;
@@ -79,8 +79,22 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     }
 }
 
+- (void)beginMeasurement {
+    _measurementCallbackBaseline = _animationCallbackCount;
+    [_renderer beginMeasurement];
+}
+- (NSDictionary *)renderMetrics {
+    NSMutableDictionary *result = [[_renderer metrics] mutableCopy];
+    result[@"drawable_width"] = @(_metalView.drawableSize.width);
+    result[@"drawable_height"] = @(_metalView.drawableSize.height);
+    result[@"drawing_mode"] = @"ScreenSaverView animateOneFrame";
+    result[@"animation_callbacks"] = @(_animationCallbackCount-_measurementCallbackBaseline);
+    return result;
+}
+
 - (BOOL)hasActiveSource { return static_cast<bool>(_source); }
 - (NSUInteger)sourceCallbackCount { return _sourceCallbackCount; }
+- (NSUInteger)animationCallbackCount { return _animationCallbackCount; }
 
 - (void)setCapture:(std::shared_ptr<const fah::Capture>)capture {
     [_renderer setCapture:std::move(capture)];
@@ -151,6 +165,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 
 - (void)animateOneFrame {
     if (!self.isAnimating) return;
+    ++_animationCallbackCount;
     [_metalView draw];
     [self updateStatus];
 }
