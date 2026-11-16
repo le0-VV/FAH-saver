@@ -101,3 +101,5 @@ try {
 } finally { globalThis.fetch = savedFetch; }
 
 console.log('Browser capture, scene, mesh, camera and stream checks passed.');
+
+import './runtime-test.mjs';

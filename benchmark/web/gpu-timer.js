@@ -7,7 +7,7 @@
     const supported = !!ext && gl.getQuery(ext.TIME_ELAPSED_EXT, ext.QUERY_COUNTER_BITS_EXT) > 0;
     const owned = new Set(), idle = [], pending = [], samplesMs = [];
     const counts = {attemptedFrames: 0, submittedQueries: 0, completedQueries: 0,
-      droppedFrames: 0, droppedPoolFull: 0, discardedQueries: 0, invalidatedSamples: 0};
+      droppedFrames: 0, droppedPoolFull: 0, droppedSamples: 0, discardedQueries: 0, invalidatedSamples: 0};
     let active = null, invalid = null, finalResult = null;
     let reason = supported ? null : ext ? 'The GPU elapsed-time counter has zero bits.' : `${extensionName} is unavailable.`;
     if (supported) gl.getParameter(ext.GPU_DISJOINT_EXT); // Clear clock changes from before this trial.
@@ -41,7 +41,9 @@
         if (!Number.isSafeInteger(nanoseconds) || nanoseconds < 0) {
           invalidate('error', 'The GPU query returned an invalid elapsed time.'); return;
         }
-        samplesMs.push(nanoseconds / 1e6); idle.push(query);
+        if (samplesMs.length < 100000) samplesMs.push(nanoseconds / 1e6);
+        else counts.droppedSamples++;
+        idle.push(query);
       }
     }
 
@@ -72,22 +74,28 @@
       gl.endQuery(ext.TIME_ELAPSED_EXT); pending.push(active); active = null;
     }
 
-    function finish() {
+    function snapshot(final = false) {
       if (finalResult) return finalResult;
       poll();
-      const pendingAtFinish = pending.length + (active ? 1 : 0);
+      const pendingQueries = pending.length + (active ? 1 : 0);
       const status = invalid || (!supported ? 'unsupported' : samplesMs.length ? 'measured' : 'no-samples');
-      if (status === 'no-samples') reason = 'No GPU query result was available before the trial ended.';
-      finalResult = {samplesMs: samplesMs.slice(), info: {
-        extension: extensionName, supported, status, reason, ...counts, sampleCount: samplesMs.length,
-        pendingAtFinish, maxPendingQueries,
+      const currentReason = status === 'no-samples' ? 'No completed GPU query result is available.' : status === 'measured' ? null : reason;
+      return {samplesMs: samplesMs.slice(), info: {
+        extension: extensionName, supported, status, reason: currentReason, ...counts, sampleCount: samplesMs.length,
+        ...(final ? {pendingAtFinish: pendingQueries} : {}), pendingQueries, maxPendingQueries,
+        sampleLimit: 100000,
         scope: 'Clear, background and protein draw commands; excludes geometry preparation, uploads and presentation.'
       }};
+    }
+
+    function finish() {
+      if (finalResult) return finalResult;
+      finalResult = snapshot(true);
       releaseQueries();
       return finalResult;
     }
 
-    return {begin, end, poll, finish,
+    return {begin, end, poll, snapshot, finish,
       contextLost: () => invalidate('context-lost', 'The WebGL context was lost during GPU timing.')};
   }
 

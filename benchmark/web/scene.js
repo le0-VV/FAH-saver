@@ -103,10 +103,10 @@ function viewProjection(angle, aspect, radius) {
   return multiply(projection, viewModel);
 }
 
-function styleAt(mode, seconds) {
+function styleAt(mode, seconds, interval = 10, baseStyle = 1) {
   if (/^[123]$/.test(String(mode))) return Number(mode);
-  const period = Math.floor(seconds / 10);
-  if (mode === 'cycle') return period % 3 + 1;
+  const period = Math.floor(seconds / interval);
+  if (mode === 'cycle') return (baseStyle - 1 + period) % 3 + 1;
   if (mode === 'random') {
     let hash = (period + 1) >>> 0;
     hash = Math.imul(hash ^ (hash >>> 16), 0x45d9f3b);

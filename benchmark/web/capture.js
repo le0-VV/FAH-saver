@@ -13,13 +13,13 @@ function requireValue(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-function parseCapture(text) {
+function parseCapture(text, policy = limits) {
   requireValue(typeof text === 'string', 'Capture must be JSON text');
   requireValue(new TextEncoder().encode(text).byteLength <= limits.bytes, 'Capture exceeds 32 MiB');
-  return validateCapture(JSON.parse(text));
+  return validateCapture(JSON.parse(text), policy);
 }
 
-function validateCapture(value) {
+function validateCapture(value, policy = limits) {
   requireValue(value && typeof value === 'object' && !Array.isArray(value), 'Capture must be an object');
   const topology = value.topology;
   requireValue(topology && typeof topology === 'object', 'Capture has no topology');
@@ -48,13 +48,20 @@ function validateCapture(value) {
     `Bond ${index} has an invalid atom index`);
     return [bond[0], bond[1]];
   });
-  requireValue(Array.isArray(value.frames) && value.frames.length > 0 && value.frames.length <= limits.frames,
-    'Capture must contain between 1 and 10000 frames');
-  let positionCount = 0;
-  const frames = value.frames.map((frame, frameIndex) => {
-    requireValue(Array.isArray(frame) && frame.length === atoms.length, `Frame ${frameIndex} has the wrong atom count`);
-    positionCount += frame.length;
-    requireValue(positionCount <= limits.positions, 'Capture exceeds the decoded position budget');
+  requireValue(Array.isArray(value.frames) && value.frames.length > 0 && value.frames.length <= policy.frames,
+    `Capture must contain between 1 and ${policy.frames} frames`);
+  const frames = validateFrames(value.frames, atoms.length, policy.positions);
+
+  return {atoms, bonds, frames};
+}
+
+
+function validateFrames(value, atomCount, maximumPositions = limits.positions) {
+  requireValue(Array.isArray(value), 'Frames must be an array');
+  requireValue(Number.isInteger(atomCount) && atomCount > 0 && atomCount <= limits.atoms, 'Invalid atom count');
+  requireValue(value.length <= Math.floor(maximumPositions / atomCount), 'Capture exceeds the decoded position budget');
+  return value.map((frame, frameIndex) => {
+    requireValue(Array.isArray(frame) && frame.length === atomCount, `Frame ${frameIndex} has the wrong atom count`);
     const positions = new Float32Array(frame.length * 3);
     frame.forEach((point, index) => {
       requireValue(Array.isArray(point) && point.length === 3 &&
@@ -64,7 +71,6 @@ function validateCapture(value) {
     });
     return positions;
   });
-  return {atoms, bonds, frames};
 }
 
 async function readCaptureURL(url) {
@@ -94,5 +100,5 @@ async function readCaptureURL(url) {
   return parseCapture(new TextDecoder('utf-8', {fatal: true}).decode(data));
 }
 
-globalThis.FAHCapture = {limits, parseCapture, validateCapture, readCaptureURL};
+globalThis.FAHCapture = {limits, parseCapture, validateCapture, validateFrames, readCaptureURL};
 })();

@@ -1,7 +1,8 @@
 (() => {
   'use strict';
   const {limits, parseCapture, validateCapture, readCaptureURL} = globalThis.FAHCapture;
-  const {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, elapsedSeconds, nextFrameDeadline} = globalThis.FAHScene;
+  const {styleAt, elapsedSeconds, nextFrameDeadline} = globalThis.FAHScene;
+  const {createRenderer} = globalThis.FAHWebRenderer;
   const {createGpuTimer} = globalThis.FAHGpuTimer;
   const canvas = document.getElementById('canvas');
   const status = document.getElementById('status');
@@ -9,64 +10,9 @@
   const controls = document.getElementById('controls');
   const fields = Object.fromEntries(['capture', 'playback', 'style', 'fps', 'background', 'colour', 'seconds'].map(id => [id, document.getElementById(id)]));
   const params = new URLSearchParams(location.search);
-  let gl, proteinProgram, backgroundProgram, atomMesh, bondMesh, uniform, backgroundUniform;
-  let capture, scene, previousFrame = -1, previousStyle = -1, epoch = 0, nextDue = 0, animation = 0, metrics = null;
-  let settings = {fps: 60, style: '1', playback: 'latest', background: 'sky', colour: [.02, .025, .035], seconds: 30, warmup: 0};
-
-  const vertexSource = `#version 300 es
-    precision highp float;
-    layout(location=0) in vec3 position;
-    layout(location=1) in vec3 normal;
-    layout(location=2) in mat4 instance;
-    layout(location=6) in vec4 colour;
-    uniform mat4 viewProjection;
-    uniform mat3 rotation;
-    out vec3 vertexNormal;
-    out vec4 vertexColour;
-    void main() {
-      vec4 clip = viewProjection * instance * vec4(position, 1.);
-      clip.z = 2. * clip.z - clip.w;
-      gl_Position = clip;
-      vertexNormal = rotation * mat3(instance) * normal;
-      vertexColour = colour;
-    }`;
-  const fragmentSource = `#version 300 es
-    precision highp float;
-    in vec3 vertexNormal;
-    in vec4 vertexColour;
-    out vec4 outputColour;
-    void main() {
-      float light = .25 + .75 * max(dot(normalize(vertexNormal), normalize(vec3(.4,.8,1.))), 0.);
-      outputColour = vec4(vertexColour.rgb * light, 1.);
-    }`;
-  const backgroundVertexSource = `#version 300 es
-    precision highp float;
-    out vec2 uv;
-    void main() {
-      vec2 p = gl_VertexID == 0 ? vec2(-1.,-1.) : gl_VertexID == 1 ? vec2(3.,-1.) : vec2(-1.,3.);
-      gl_Position = vec4(p,0.,1.);
-      uv = vec2(p.x * .5 + .5, .5 - p.y * .5);
-    }`;
-  const backgroundFragmentSource = `#version 300 es
-    precision highp float;
-    in vec2 uv;
-    uniform bool sky;
-    uniform vec3 solid;
-    out vec4 outputColour;
-    void main() {
-      vec3 colour = solid;
-      if (sky) {
-        colour = mix(vec3(.09,.23,.40), vec3(.55,.70,.80), uv.y);
-        if (uv.y > .55) {
-          float depth = (uv.y - .55) / .45;
-          vec2 p = vec2((uv.x - .5) * 6., 3.) / max(depth, .02);
-          vec2 grid = abs(fract(p - .5) - .5) / max(fwidth(p), vec2(.0001));
-          float line = 1. - min(min(grid.x, grid.y), 1.);
-          colour = mix(colour, vec3(.25,.38,.45), line * depth * .35);
-        }
-      }
-      outputColour = vec4(colour,1.);
-    }`;
+  let renderer, gl;
+  let capture, epoch = 0, nextDue = 0, animation = 0, metrics = null;
+  let settings = {fps: 60, style: '1', playback: 'latest', background: 'sky', colour: [.02, .025, .035], seconds: 30, warmup: 0, snapshotInterval: .1};
 
   function reportError(error) {
     status.className = 'error';
@@ -75,61 +21,17 @@
     if (metrics) finish('error', status.textContent);
   }
 
-  function program(vertex, fragment) {
-    const shaders = [];
-    const output = gl.createProgram();
-    try {
-      for (const [kind, source] of [[gl.VERTEX_SHADER, vertex], [gl.FRAGMENT_SHADER, fragment]]) {
-        const shader = gl.createShader(kind);
-        shaders.push(shader);
-        gl.shaderSource(shader, source); gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
-        gl.attachShader(output, shader);
-      }
-      gl.linkProgram(output);
-      if (!gl.getProgramParameter(output, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(output));
-      return output;
-    } catch (error) { gl.deleteProgram(output); throw error; }
-    finally { for (const shader of shaders) gl.deleteShader(shader); }
-  }
-
-  function uploadMesh(mesh) {
-    const vao = gl.createVertexArray(), vertex = gl.createBuffer(), index = gl.createBuffer(), instances = gl.createBuffer();
-    gl.bindVertexArray(vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertex); gl.bufferData(gl.ARRAY_BUFFER, mesh.vertices, gl.STATIC_DRAW);
-    for (let i = 0; i < 2; i++) {
-      gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 3, gl.FLOAT, false, 24, i * 12);
-    }
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.indices, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, instances);
-    for (let i = 0; i < 5; i++) {
-      gl.enableVertexAttribArray(2 + i); gl.vertexAttribPointer(2 + i, 4, gl.FLOAT, false, 80, i * 16); gl.vertexAttribDivisor(2 + i, 1);
-    }
-    gl.bindVertexArray(null);
-    return {vao, vertex, index, instances, indexCount: mesh.indices.length, count: 0};
-  }
-
-  function setInstances(mesh, data) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, mesh.instances);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-    mesh.count = data.length / 20;
-  }
-
   function initialiseGL() {
-    gl = canvas.getContext('webgl2', {alpha: false, antialias: false, depth: true, powerPreference: 'default'});
-    if (!gl) throw new Error('WebGL 2 is unavailable');
-    proteinProgram = program(vertexSource, fragmentSource);
-    backgroundProgram = program(backgroundVertexSource, backgroundFragmentSource);
-    uniform = {vp: gl.getUniformLocation(proteinProgram, 'viewProjection'), rotation: gl.getUniformLocation(proteinProgram, 'rotation')};
-    backgroundUniform = {sky: gl.getUniformLocation(backgroundProgram, 'sky'), solid: gl.getUniformLocation(backgroundProgram, 'solid')};
-    atomMesh = uploadMesh(sphereMesh()); bondMesh = uploadMesh(cylinderMesh());
-    gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE); gl.depthFunc(gl.LESS);
-    gl.frontFace(gl.CCW); gl.cullFace(gl.BACK);
-    canvas.addEventListener('webglcontextlost', event => {
-      event.preventDefault(); cancelAnimationFrame(animation); animation = 0;
-      metrics?.gpuTimer.contextLost();
-      reportError(new Error('WebGL context was lost. Reload before another trial.'));
-    });
+    renderer = createRenderer(canvas, {onContextLost: error => {
+      cancelAnimationFrame(animation); animation = 0; metrics?.gpuTimer.contextLost(); reportError(error);
+    }});
+    gl = renderer.gl; configureRenderer();
+  }
+  function configureRenderer() {
+    renderer?.configure({fps: settings.fps, style: /^[123]$/.test(settings.style) ? Number(settings.style) : 1,
+      styleMode: /^[123]$/.test(settings.style) ? 'fixed' : settings.style,
+      playback: settings.playback, background: settings.background, colour: settings.colour,
+      snapshotInterval: settings.snapshotInterval, styleInterval: 10});
   }
 
   function readSettings() {
@@ -139,46 +41,13 @@
     if (!Number.isFinite(next.seconds) || next.seconds < 1 || next.seconds > 3600) throw new Error('Trial duration must be from 1 to 3600 seconds');
     styleAt(next.style, 0);
     if (!['latest', 'loop'].includes(next.playback)) throw new Error('Playback must be latest or loop');
-    if (!['sky', 'solid'].includes(next.background)) throw new Error('Background must be sky or solid');
-    settings = next;
+    if (!['sky', 'dark', 'solid'].includes(next.background)) throw new Error('Background must be sky, dark or solid');
+    settings = next; configureRenderer();
   }
 
-  function resize() {
-    const width = Math.max(1, Math.round(canvas.clientWidth * devicePixelRatio));
-    const height = Math.max(1, Math.round(canvas.clientHeight * devicePixelRatio));
-    if (canvas.width !== width || canvas.height !== height) {
-      if (metrics) throw new Error('Drawable dimensions changed during the trial');
-      canvas.width = width; canvas.height = height;
-    }
-    gl.viewport(0, 0, canvas.width, canvas.height);
-  }
-
+  function resize() { renderer.resize(!!metrics); }
   function draw(now, gpuTimer) {
-    resize();
-    const seconds = elapsedSeconds(now, epoch);
-    const frame = settings.playback === 'latest' ? capture.frames.length - 1 : Math.floor(seconds * 10) % capture.frames.length;
-    const style = styleAt(settings.style, seconds);
-    if (frame !== previousFrame || style !== previousStyle) {
-      scene = makeScene(capture, frame, style);
-      setInstances(atomMesh, scene.atoms); setInstances(bondMesh, scene.bonds);
-      previousFrame = frame; previousStyle = style;
-    }
-    const angle = seconds / 5, c = Math.cos(angle), s = Math.sin(angle);
-    const camera = viewProjection(angle, canvas.width / canvas.height, scene.radius);
-    const rotation = new Float32Array([c, 0, -s, 0, 1, 0, s, 0, c]);
-    const timed = gpuTimer?.begin();
-    try {
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.useProgram(backgroundProgram); gl.bindVertexArray(null);
-      gl.uniform1i(backgroundUniform.sky, settings.background === 'sky'); gl.uniform3fv(backgroundUniform.solid, settings.colour);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.useProgram(proteinProgram);
-      gl.uniformMatrix4fv(uniform.vp, false, camera);
-      gl.uniformMatrix3fv(uniform.rotation, false, rotation);
-      for (const mesh of [atomMesh, bondMesh]) if (mesh.count) {
-        gl.bindVertexArray(mesh.vao); gl.drawElementsInstanced(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0, mesh.count);
-      }
-    } finally { if (timed) gpuTimer.end(); }
+    renderer.draw(elapsedSeconds(now, epoch), gpuTimer, !!metrics);
     if (metrics && now - metrics.lastStatus > 1000) {
       status.textContent = `Running: ${Math.max(0, (now - metrics.start) / 1000).toFixed(1)} / ${settings.seconds} s; ${capture.atoms.length} atoms`;
       metrics.lastStatus = now;
@@ -253,7 +122,7 @@
     if (metrics) finish('cancelled', 'A new trial started');
     readSettings(); resize();
     window.benchmarkResult = null; resultElement.hidden = true;
-    epoch = performance.now(); nextDue = epoch; previousFrame = -1; previousStyle = -1;
+    epoch = performance.now(); nextDue = epoch;
     metrics = {start: epoch + settings.warmup * 1000, lastDraw: 0, lastRaf: 0, lastStatus: epoch,
       draws: 0, drawIntervals: [], rafIntervals: [], cpu: [], gpuTimer: createGpuTimer(gl)};
     status.className = ''; status.textContent = settings.warmup ? 'Warming up…' : 'Running…';
@@ -266,7 +135,7 @@
     window.fahBenchmark.ready = false;
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     capture = typeof value === 'string' ? parseCapture(value) : validateCapture(value);
-    previousFrame = -1; previousStyle = -1; epoch = performance.now(); nextDue = epoch;
+    renderer.setCapture(capture); epoch = performance.now(); nextDue = epoch;
     window.fahBenchmark.ready = true;
     status.className = ''; status.textContent = `${capture.atoms.length} atoms; ${capture.bonds.length} bonds; ${capture.frames.length} snapshots`;
     if (!animation) animation = requestAnimationFrame(tick);
@@ -288,7 +157,7 @@
   });
   fields.colour.addEventListener('input', () => {
     if (metrics) finish('cancelled', 'Colour changed during the trial');
-    settings.colour = [1, 3, 5].map(i => parseInt(fields.colour.value.slice(i, i + 2), 16) / 255);
+    settings.colour = [1, 3, 5].map(i => parseInt(fields.colour.value.slice(i, i + 2), 16) / 255); configureRenderer();
   });
   document.addEventListener('dragover', event => event.preventDefault());
   document.addEventListener('drop', event => { event.preventDefault(); loadFile(event.dataTransfer.files[0]).catch(reportError); });
@@ -296,17 +165,16 @@
   window.addEventListener('pagehide', () => {
     cancelAnimationFrame(animation); animation = 0;
     if (metrics) finish('cancelled', 'Page closed during the trial');
-    if (!gl) return;
-    for (const mesh of [atomMesh, bondMesh]) if (mesh) {
-      for (const buffer of [mesh.vertex, mesh.index, mesh.instances]) gl.deleteBuffer(buffer);
-      gl.deleteVertexArray(mesh.vao);
-    }
-    gl.deleteProgram(proteinProgram); gl.deleteProgram(backgroundProgram);
+    renderer?.dispose();
   });
 
   (async () => {
     try {
       for (const name of ['fps', 'style', 'playback', 'background', 'seconds']) if (params.has(name)) fields[name].value = params.get(name);
+      if (params.has('snapshotInterval')) {
+        settings.snapshotInterval = Number(params.get('snapshotInterval'));
+        if (!Number.isFinite(settings.snapshotInterval) || settings.snapshotInterval < .05) throw new Error('Snapshot interval must be at least 0.05 seconds');
+      }
       if (params.has('warmup')) {
         settings.warmup = Number(params.get('warmup'));
         if (!Number.isFinite(settings.warmup) || settings.warmup < 0 || settings.warmup > 120) throw new Error('Warm-up must be from 0 to 120 seconds');
@@ -319,7 +187,7 @@
       }
       else if (params.has('capture')) {
         capture = await readCaptureURL(params.get('capture'));
-        previousFrame = -1; previousStyle = -1; epoch = performance.now(); nextDue = epoch;
+        renderer.setCapture(capture); epoch = performance.now(); nextDue = epoch;
         window.fahBenchmark.ready = true;
         status.textContent = `${capture.atoms.length} atoms; ${capture.frames.length} snapshots`;
         animation = requestAnimationFrame(tick);

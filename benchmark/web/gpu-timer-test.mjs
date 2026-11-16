@@ -127,3 +127,15 @@ for (const invalid of [-1, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
 }
 
 console.log('Browser GPU query support, reuse, bounds, invalidation and cleanup checks passed.');
+
+{
+  const {gl, state} = mockGL(), timer = createGpuTimer(gl);
+  assert.equal(timer.snapshot().info.status, 'no-samples');
+  assert.ok(timer.begin()); timer.end();
+  state.results.set(state.created[0], 1500000);
+  const live = timer.snapshot();
+  assert.equal(live.info.status, 'measured'); assert.equal(live.info.reason, null);
+  assert.deepEqual(live.samplesMs, [1.5]); assert.equal(state.deleted.length, 0, 'Live metrics must not destroy the query pool');
+  const final = timer.finish();
+  assert.equal(timer.snapshot(), final); assert.equal(state.deleted.length, 1);
+}
