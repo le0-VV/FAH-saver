@@ -66,8 +66,10 @@ latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a
 sky/grid, dark sky/grid or solid-colour background. The loop interval field is
 visible only in loop mode and defaults to 1 second for new settings. Existing
 explicit values are preserved. The field accepts ASCII digits and one decimal
-point, including unfinished text while editing. Invalid values keep the panel
-open with a small inline error; no modal alert is used. `--background sky|dark|solid`
+point, including unfinished text while editing. Its native field editor rejects
+invalid keyboard and paste replacements before they change the text. Invalid
+values keep the panel open with a small message directly below the offending
+field; lower rows move down temporarily and no modal alert is used. `--background sky|dark|solid`
 selects these backgrounds in the preview. The panel's lower-left corner shows
 the version and build of the loaded saver bundle. Options use ScreenSaverDefaults.
 Starting and stopping the saver starts and stops its native source. The retired

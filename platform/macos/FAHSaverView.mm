@@ -24,15 +24,60 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     if (value) *value = text;
     return YES;
 }
-- (BOOL)isPartialStringValid:(NSString **)text proposedSelectedRange:(NSRangePointer)selection
-             originalString:(NSString *)original originalSelectedRange:(NSRange)originalSelection
-           errorDescription:(NSString **)error {
-    if (text && fah::decimalPartial((*text).UTF8String ?: "")) return YES;
-    if (text) *text = original;
-    if (selection) *selection = originalSelection;
-    if (error) *error = @"Use digits and one decimal point.";
+@end
+
+@interface FAHDecimalEditor : NSTextView
+@property(nonatomic, weak) NSTextField *decimalField;
+@end
+@implementation FAHDecimalEditor
+- (BOOL)acceptText:(NSString *)text {
+    if (fah::decimalPartial(text.UTF8String ?: "")) return YES;
+    id<NSTextFieldDelegate> delegate = self.decimalField.delegate;
+    if ([delegate respondsToSelector:@selector(control:didFailToValidatePartialString:errorDescription:)])
+        [delegate control:self.decimalField didFailToValidatePartialString:text errorDescription:@"Digits and one decimal point only."];
     return NO;
 }
+- (BOOL)shouldChangeTextInRange:(NSRange)range replacementString:(NSString *)replacement {
+    if (replacement && (range.location > self.string.length || range.length > self.string.length-range.location ||
+        ![self acceptText:[self.string stringByReplacingCharactersInRange:range withString:replacement]])) return NO;
+    return [super shouldChangeTextInRange:range replacementString:replacement];
+}
+- (BOOL)shouldChangeTextInRanges:(NSArray<NSValue *> *)ranges replacementStrings:(NSArray<NSString *> *)replacements {
+    if (replacements) {
+        if (ranges.count != replacements.count) return NO;
+        NSMutableString *text = [self.string mutableCopy];
+        for (NSInteger index=(NSInteger)ranges.count-1; index>=0; --index) {
+            NSRange range = ranges[index].rangeValue;
+            if (range.location > text.length || range.length > text.length-range.location) return NO;
+            [text replaceCharactersInRange:range withString:replacements[index]];
+        }
+        if (![self acceptText:text]) return NO;
+    }
+    return [super shouldChangeTextInRanges:ranges replacementStrings:replacements];
+}
+@end
+
+@interface FAHDecimalCell : NSTextFieldCell
+@end
+@implementation FAHDecimalCell {
+    FAHDecimalEditor *_decimalEditor;
+}
+- (NSTextView *)fieldEditorForView:(NSView *)controlView {
+    if (!_decimalEditor) {
+        _decimalEditor = [[FAHDecimalEditor alloc] initWithFrame:NSZeroRect];
+        _decimalEditor.fieldEditor = YES;
+        _decimalEditor.richText = NO;
+        _decimalEditor.importsGraphics = NO;
+    }
+    _decimalEditor.decimalField = (NSTextField *)controlView;
+    return _decimalEditor;
+}
+@end
+
+@interface FAHDecimalField : NSTextField
+@end
+@implementation FAHDecimalField
++ (Class)cellClass { return FAHDecimalCell.class; }
 @end
 
 @interface FAHSaverView () <NSTextFieldDelegate>
@@ -72,6 +117,7 @@ static void cacheError(const std::string& message) {
     NSWindow *_sheet;
     NSPopUpButton *_playback, *_style, *_background;
     NSTextField *_sourceURL, *_unit, *_fps, *_snapshotInterval, *_snapshotIntervalUnit, *_optionsError;
+    NSMapTable<NSView *,NSValue *> *_optionsBaseFrames;
     NSColorWell *_colour;
 }
 
@@ -352,6 +398,7 @@ static void cacheError(const std::string& message) {
     _sheet.releasedWhenClosed = NO;
     _sheet.title = @"FAH Saver Options";
     NSView *content = _sheet.contentView;
+    _optionsBaseFrames = [NSMapTable strongToStrongObjectsMapTable];
     auto label = [&](NSString *title, CGFloat y) {
         NSTextField *field = [NSTextField labelWithString:title];
         field.frame = NSMakeRect(20,y,140,24); [content addSubview:field];
@@ -374,9 +421,10 @@ static void cacheError(const std::string& message) {
     [_playback selectItemAtIndex:[_defaults boolForKey:@"loop"] ? 1 : 0];
     _playback.target = self; _playback.action = @selector(updatePlaybackControls:);
     const double savedInterval = [_defaults doubleForKey:@"snapshotInterval"];
-    _snapshotInterval = text(std::isfinite(savedInterval) && savedInterval >= 0 ?
-        [NSString stringWithUTF8String:fah::decimalText(savedInterval).c_str()] : @"",210);
-    _snapshotInterval.frame = NSMakeRect(380,210,65,24);
+    _snapshotInterval = [[FAHDecimalField alloc] initWithFrame:NSMakeRect(380,210,65,24)];
+    _snapshotInterval.stringValue = std::isfinite(savedInterval) && savedInterval >= 0 ?
+        [NSString stringWithUTF8String:fah::decimalText(savedInterval).c_str()] : @"";
+    [content addSubview:_snapshotInterval];
     _snapshotInterval.accessibilityLabel = @"Seconds between snapshots";
     _snapshotInterval.toolTip = @"At least 0.05 seconds between snapshots. This does not change the display frame rate.";
     _snapshotInterval.formatter = [FAHDecimalFormatter new];
@@ -404,14 +452,11 @@ static void cacheError(const std::string& message) {
     _colour.accessibilityLabel = @"Solid background colour";
     [content addSubview:_colour];
     _optionsError = [NSTextField wrappingLabelWithString:@""];
-    _optionsError.frame = NSMakeRect(20,58,535,36);
     _optionsError.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     _optionsError.textColor = NSColor.systemRedColor;
     _optionsError.accessibilityLabel = @"Options validation error";
     _optionsError.hidden = YES;
     [content addSubview:_optionsError];
-    if (!std::isfinite(savedInterval) || savedInterval < .05)
-        [self showOptionsError:@"Saved interval is invalid. Enter at least 0.05 seconds." field:_snapshotInterval];
     NSBundle *module = [NSBundle bundleForClass:FAHSaverView.class];
     NSString *version = [module objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
     NSString *build = [module objectForInfoDictionaryKey:@"CFBundleVersion"];
@@ -426,6 +471,11 @@ static void cacheError(const std::string& message) {
     save.frame = NSMakeRect(460,20,95,32); save.keyEquivalent = @"\r"; [content addSubview:save];
     NSButton *cancel = [NSButton buttonWithTitle:@"Cancel" target:self action:@selector(cancelOptions:)];
     cancel.frame = NSMakeRect(355,20,95,32); cancel.keyEquivalent = @"\x1b"; [content addSubview:cancel];
+    for (NSView *control in content.subviews)
+        if (control != _optionsError && control.frame.origin.y >= 100)
+            [_optionsBaseFrames setObject:[NSValue valueWithRect:control.frame] forKey:control];
+    if (!std::isfinite(savedInterval) || savedInterval < .05)
+        [self showOptionsError:@"Enter at least 0.05 seconds." field:_snapshotInterval];
     return _sheet;
 }
 
@@ -439,42 +489,54 @@ static void cacheError(const std::string& message) {
 }
 
 - (void)clearOptionsError {
+    for (NSView *control in _optionsBaseFrames.keyEnumerator)
+        control.frame = [_optionsBaseFrames objectForKey:control].rectValue;
     _optionsError.stringValue = @"";
     _optionsError.hidden = YES;
 }
 
 - (void)showOptionsError:(NSString *)message field:(NSTextField *)field {
+    [self clearOptionsError];
+    const NSRect fieldFrame = [_optionsBaseFrames objectForKey:field].rectValue;
+    for (NSView *control in _optionsBaseFrames.keyEnumerator) {
+        NSRect frame = [_optionsBaseFrames objectForKey:control].rectValue;
+        if (frame.origin.y < fieldFrame.origin.y) { frame.origin.y -= 18; control.frame = frame; }
+    }
+    _optionsError.frame = NSMakeRect(fieldFrame.origin.x,fieldFrame.origin.y-18,
+        _sheet.contentView.bounds.size.width-fieldFrame.origin.x-20,14);
     _optionsError.stringValue = message;
     _optionsError.hidden = NO;
-    [_sheet makeFirstResponder:field];
+    if (!field.currentEditor || field.currentEditor != _sheet.firstResponder) [_sheet makeFirstResponder:field];
 }
 
 - (void)controlTextDidChange:(NSNotification *)notification { [self clearOptionsError]; }
 - (void)control:(NSControl *)control didFailToValidatePartialString:(NSString *)text errorDescription:(NSString *)error {
-    if (control == _snapshotInterval) [self showOptionsError:@"Use digits and one decimal point." field:_snapshotInterval];
+    if (control == _snapshotInterval) [self showOptionsError:@"Digits and one decimal point only." field:_snapshotInterval];
 }
 
 - (void)saveOptions:(id)sender {
     NSScanner *scanner = [NSScanner scannerWithString:editingText(_fps)];
     NSInteger fps;
     BOOL valid = [scanner scanInteger:&fps] && scanner.isAtEnd && fps >= 1 && fps <= 240;
-    NSString *problem = valid ? nil : @"Enter a whole frame-rate limit from 1 to 240 fps.";
+    NSString *problem = valid ? nil : @"Enter a whole number from 1 to 240.";
     NSTextField *problemField = _fps;
     double interval = [_defaults doubleForKey:@"snapshotInterval"];
     if (!problem && _playback.indexOfSelectedItem == 1) {
         NSString *intervalText = editingText(_snapshotInterval);
         NSScanner *intervalScanner = [NSScanner scannerWithString:intervalText];
         intervalScanner.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
-        if (!fah::decimalPartial(intervalText.UTF8String ?: "") || ![intervalScanner scanDouble:&interval] ||
-            !intervalScanner.isAtEnd || !std::isfinite(interval) || interval < .05) {
-            problem = @"Enter at least 0.05 seconds using digits and one decimal point.";
+        if (!fah::decimalPartial(intervalText.UTF8String ?: "")) problem = @"Digits and one decimal point only.";
+        else if (![intervalScanner scanDouble:&interval] || !intervalScanner.isAtEnd || !std::isfinite(interval))
+            problem = intervalText.length && ![intervalText isEqualToString:@"."] ? @"Enter a finite number." : @"Enter at least 0.05 seconds.";
+        else if (interval < .05) problem = @"Enter at least 0.05 seconds.";
+        if (problem) {
             problemField = _snapshotInterval;
         }
     }
     if (!problem) {
         NSURL *url = [NSURL URLWithString:editingText(_sourceURL)];
         if (!url.host.length || !([url.scheme isEqualToString:@"ws"] || [url.scheme isEqualToString:@"wss"])) {
-            problem = @"Enter a WebSocket source URL beginning with ws:// or wss://.";
+            problem = @"Enter a ws:// or wss:// URL.";
             problemField = _sourceURL;
         }
     }

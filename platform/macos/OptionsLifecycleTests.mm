@@ -67,21 +67,6 @@ int main(int argc, const char *argv[]) {
             check(initialInterval.doubleValue == 1,"New settings did not default to one second");
             NSFormatter *formatter = initialInterval.formatter;
             check(formatter != nil,"Interval edit formatter is missing");
-            for (NSString *text in @[@"",@".",@"0.",@".5",@"120",@"1.25"]) {
-                NSString *candidate = text;
-                NSRange selection = NSMakeRange(candidate.length,0);
-                check([formatter isPartialStringValid:&candidate proposedSelectedRange:&selection
-                    originalString:@"1" originalSelectedRange:NSMakeRange(1,0) errorDescription:nil],
-                    "Valid partial decimal text was rejected");
-            }
-            for (NSString *text in @[@"1e3",@"12abc",@"1..2",@"-1",@"+1",@"1,5",@" 1",@"１",@"١"]) {
-                NSString *candidate = text;
-                NSRange selection = NSMakeRange(candidate.length,0);
-                check(![formatter isPartialStringValid:&candidate proposedSelectedRange:&selection
-                    originalString:@"1.25" originalSelectedRange:NSMakeRange(2,0) errorDescription:nil] &&
-                    [candidate isEqualToString:@"1.25"] && NSEqualRanges(selection,NSMakeRange(2,0)),
-                    "Invalid typing/paste was not rejected as a whole edit");
-            }
             for (NSString *text in @[@"",@"."]) {
                 id object = nil;
                 check([formatter getObjectValue:&object forString:text errorDescription:nil] && [object isEqual:text],
@@ -92,6 +77,46 @@ int main(int argc, const char *argv[]) {
             parent.releasedWhenClosed = NO;
             parent.alphaValue = 0;
             parent.ignoresMouseEvents = YES;
+            {
+                NSWindow *sheet = view.configureSheet;
+                sheet.alphaValue = 0; sheet.ignoresMouseEvents = YES;
+                NSPopUpButton *playback = (NSPopUpButton *)namedControl(sheet.contentView,@"Snapshot playback");
+                [playback selectItemAtIndex:1]; [NSApp sendAction:playback.action to:playback.target from:playback];
+                NSTextField *field = (NSTextField *)namedControl(sheet.contentView,@"Seconds between snapshots");
+                __block bool ended = false;
+                [parent beginSheet:sheet completionHandler:^(NSModalResponse response) { ended = response == NSModalResponseCancel; }];
+                [sheet makeFirstResponder:field];
+                NSTextView *editor = (NSTextView *)field.currentEditor;
+                check([editor isKindOfClass:NSTextView.class],"Native interval field editor did not start");
+                for (NSString *replacement in @[@"a",@"1e3",@"1..2",@"-2",@"+1",@"1,5",@" 1",@"１",@"١"]) {
+                    editor.string = @"1.25"; editor.selectedRange = NSMakeRange(0,4);
+                    [editor insertText:replacement replacementRange:editor.selectedRange];
+                    check([editor.string isEqualToString:@"1.25"] && NSEqualRanges(editor.selectedRange,NSMakeRange(0,4)),
+                          "Native editor accepted non-decimal replacement text or changed its selection");
+                }
+                editor.string = @"1.25"; editor.selectedRange = NSMakeRange(2,0);
+                [editor insertText:@"." replacementRange:editor.selectedRange];
+                check([editor.string isEqualToString:@"1.25"] && NSEqualRanges(editor.selectedRange,NSMakeRange(2,0)),
+                      "Native editor accepted a second decimal point or changed its selection");
+                editor.string = @"0"; editor.selectedRange = NSMakeRange(0,1);
+                NSEvent *letter = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                    timestamp:0 windowNumber:sheet.windowNumber context:nil characters:@"a" charactersIgnoringModifiers:@"a"
+                    isARepeat:NO keyCode:0];
+                [editor keyDown:letter];
+                check([editor.string isEqualToString:@"0"],"Native keyDown accepted a letter");
+                NSPasteboard *pasteboard = [NSPasteboard pasteboardWithUniqueName];
+                [pasteboard setString:@"12abc.3" forType:NSPasteboardTypeString];
+                editor.string = @"1.25"; editor.selectedRange = NSMakeRange(0,4);
+                [editor readSelectionFromPasteboard:pasteboard type:NSPasteboardTypeString];
+                check([editor.string isEqualToString:@"1.25"],"Native paste path changed the field for invalid decimal text");
+                [pasteboard releaseGlobally];
+                for (NSString *replacement in @[@"",@".",@"0.",@".5",@"120.5"]) {
+                    editor.string = @"1.25"; editor.selectedRange = NSMakeRange(0,4);
+                    [editor insertText:replacement replacementRange:editor.selectedRange];
+                    check([editor.string isEqualToString:replacement],"Native editor rejected valid decimal replacement");
+                }
+                sendButton(sheet,@"Cancel"); waitForSheet(ended); [sheet close];
+            }
             unsigned saves = 0, cancels = 0;
             for (unsigned cycle=0; cycle<20; ++cycle) {
                 @autoreleasepool {
@@ -160,6 +185,13 @@ int main(int argc, const char *argv[]) {
                 check(!inlineError.hidden && inlineError.stringValue.length &&
                       [beforeInvalid isEqual:[preferences.defaults persistentDomainForName:preferences.name]],
                       "Invalid input changed saved settings or lacked inline feedback");
+                check(NSMaxY(inlineError.frame) <= NSMinY(field.frame) && NSMinX(inlineError.frame) >= NSMinX(field.frame),
+                      "Inline error is not directly below the offending field");
+                check([inlineError.stringValue sizeWithAttributes:@{NSFontAttributeName:inlineError.font}].width <= inlineError.frame.size.width,
+                      "Inline message is too wide for its field-local space");
+                for (NSView *control in sheet.contentView.subviews)
+                    if (control != inlineError && !control.hidden)
+                        check(!NSIntersectsRect(inlineError.frame,control.frame),"Inline error overlaps another form row");
                 check([field.stringValue isEqualToString:text] && field.currentEditor == sheet.firstResponder,
                       "Invalid input or field focus was lost");
             };
