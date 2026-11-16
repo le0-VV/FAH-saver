@@ -8,7 +8,7 @@ The CMake subdirectory builds three targets:
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
-use ScreenSaver. The minimum deployment target is macOS 10.15. Apple silicon is
+use ScreenSaver. The prototype deployment target is macOS 11.0. Apple silicon is
 the tested build architecture; Intel has not been tested.
 
 ## Preview and measurement
@@ -30,8 +30,9 @@ Example commands, using paths from the parent build directory:
 Use `--style cycle` or `--style random` for timed style changes. The provisional
 style interval is 10 seconds; loop playback advances a snapshot every 0.1 seconds.
 The user frame-rate limit does not alter snapshot cadence. `--unit ID` selects a
-specific WU for a live source. The source emits an explicit error if selection is
-ambiguous. The harness waits up to 30 seconds for its first usable live snapshot.
+specific WU for a live source. Without an ID, the source selects the first running
+WU and reports when none is available. The harness waits up to 30 seconds for its
+first usable live snapshot.
 
 Output JSON distinguishes CPU encoding time, GPU command-buffer time and actual
 drawable presentation intervals. Offscreen mode has no presentation timestamps,
@@ -42,7 +43,7 @@ mode keeps the selected recording unchanged so renderers can compare the same
 fixture. Raw donor or account state is not written to metrics.
 
 Drawable width and height refer to physical pixels. The defaults are 1024×768.
-Metal uses one sample per pixel, opaque shading and no face culling. Geometry is
+Metal uses one sample per pixel, opaque shading and back-face culling. Geometry is
 instanced and uploaded once. Instance data changes only on snapshot or style
 updates. Per-display-frame work updates camera uniforms and submits draw calls.
 

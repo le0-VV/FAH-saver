@@ -45,6 +45,22 @@ The sky and grid are a cheap approximation agreed for this comparison. They do
 not reproduce the FAH viewer's full atmospheric shader. The default solid colour
 is RGB `(0.02, 0.025, 0.035)`. Select another solid colour through the native colour
 input. Reference-image checks must confirm matching scenes before timing.
+All candidates use one sample per pixel, opaque materials and back-face culling
+for the protein. The background disables culling. Camera rotation and style
+intervals are matched between candidates.
+
+On macOS, the CMake target `fah_web_benchmark` provides a WKWebView host:
+
+```sh
+build/fah_web_benchmark --capture captures/protein.json \
+  --html "$PWD/benchmark/web/index.html" --style 2 --fps 60 --seconds 30 \
+  --width 1280 --height 720 --playback latest --background sky \
+  --output results/webgl.json
+```
+
+Width and height are physical drawable pixels. The host injects the capture and
+does not start a local web server. Its CPU and memory metrics cover the host
+only; separate WebKit processes remain explicitly unmeasured.
 
 ## Native web-view harness
 

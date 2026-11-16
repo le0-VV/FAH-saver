@@ -32,7 +32,7 @@ Or select a live FAH endpoint reachable through the private LAN or Tailscale:
 snapshots at ten snapshots per second. Display frame rate is independent.
 `--fps` accepts integers from 1 to 240. No model is substituted when data is
 unavailable; the host displays connection or configuration status instead.
-Live loop retention fails explicitly at 128 MiB of coordinates or 100,000
+Live loop retention fails explicitly at 128 MiB of coordinates or 10,000
 snapshots. Latest mode retains one snapshot. A disconnection clears the model.
 
 `--fullscreen true` runs the harness through the same full-screen host and input
