@@ -233,7 +233,10 @@ static NSNumber *draws(NSDictionary *metrics) {
             view.paused=YES;view.enableSetNeedsDisplay=NO;view.framebufferOnly=YES;view.colorPixelFormat=MTLPixelFormatBGRA8Unorm;
             canvas.driver=[ECMetalDriver new];canvas.driver.renderer=canvas.metal;
             canvas.driver.width=[layout[@"width"] integerValue];canvas.driver.height=[layout[@"height"] integerValue];
-            canvas.driver.changed=^(NSString *message){ if(message)[weakSelf fail:message];else[weakSelf checkLoading]; };
+            canvas.driver.changed=^(NSString *message){
+                if(message)dispatch_async(dispatch_get_main_queue(),^{[weakSelf fail:message];});
+                else[weakSelf checkLoading];
+            };
             view.delegate=canvas.driver;canvas.presentation=view;canvas.started=YES;
         } else {
             NSError *error=nil;canvas.web=[[FAHWebRenderer alloc] initWithAssetsURL:_config->assets error:&error];
@@ -345,6 +348,10 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (void)stopped {
     if(_terminal||_cancelled)return;
     protect(self,^{[self->_collectionTimer invalidate];self->_collectionTimer=nil;[self releasePresentation];
+        for(ECCanvas *canvas in self->_canvases) {
+            NSString *error=canvas.metal?canvas.metal.lastError:canvas.web.lastError;
+            if(error.length){[self fail:error];return;}
+        }
         [self phase:@"stopped" timestamp:@"stopped_uptime"];__weak ECHarness *weakSelf=self;
         self->_phaseTimer=[NSTimer scheduledTimerWithTimeInterval:self->_config->cooldown repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf complete];}];});
 }
