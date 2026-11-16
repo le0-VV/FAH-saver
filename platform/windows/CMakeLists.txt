@@ -8,7 +8,8 @@ find_program(FAH_GLSLANG_VALIDATOR NAMES glslangValidator HINTS "$ENV{VULKAN_SDK
 add_executable(fah_saver_windows WIN32 Main.cpp Renderer.cpp)
 set_target_properties(fah_saver_windows PROPERTIES OUTPUT_NAME FAHSaver SUFFIX ".scr")
 target_compile_features(fah_saver_windows PRIVATE cxx_std_17)
-target_compile_definitions(fah_saver_windows PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0a00)
+target_compile_definitions(fah_saver_windows PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0a00
+    FAH_SAVER_VERSION="${PROJECT_VERSION}")
 target_link_libraries(fah_saver_windows PRIVATE fah_core fah_source Vulkan::Vulkan user32 gdi32 shell32 comdlg32 advapi32 psapi)
 if(MSVC)
     target_compile_options(fah_saver_windows PRIVATE /W4 /permissive- /utf-8)

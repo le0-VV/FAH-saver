@@ -30,7 +30,9 @@ Or select a live FAH endpoint reachable through the private LAN or Tailscale:
 
 `--unit ID` selects a particular current WU. Fixed styles are `1`, `2` and `3`;
 `cycle` and `random` change style every ten seconds. Loop playback advances
-snapshots at ten snapshots per second. Display frame rate is independent.
+snapshots every 0.5 seconds by default. Use `--snapshot-interval SECONDS` for a
+finite interval from 0.05 to 60 seconds. Latest mode ignores this cadence.
+Display frame rate is independent.
 `--fps` accepts integers from 1 to 240. No model is substituted when data is
 unavailable; the host displays connection or configuration status instead.
 Live loop retention fails explicitly at 128 MiB of coordinates or 10,000
@@ -51,6 +53,14 @@ Native screensaver entry points:
 - `/p HWND` or `/p:HWND` embeds the preview in a supplied parent window.
 - `/c` or `/c:HWND` opens configuration. Settings are stored under the current
   user's `Software\FAHSaver` registry key.
+
+The options panel shows the executable's build version in its lower-left corner.
+Selecting loop playback exposes the snapshot interval field; changing to latest
+leaves the saved interval intact. Background choices are light sky/grid, dark
+sky/grid and a custom solid colour. The corresponding CLI values are `sky`,
+`dark` and `solid`. Existing `sky` and `solid` settings keep their previous
+meaning. The sky/grid presets are native approximations; they do not reproduce
+the web viewer's procedural atmosphere exactly.
 
 The initial full-screen host uses one surface across the virtual desktop. Mixed
 refresh rates and independent per-monitor scenes need further host work.

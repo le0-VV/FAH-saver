@@ -395,7 +395,7 @@ struct Renderer::Impl {
         vkCmdDrawIndexed(command,geometry.indexCount,geometry.instanceCount,0,0,0);
     }
 
-    DrawTiming draw(float angle, bool sky, const float colour[3]) {
+    DrawTiming draw(float angle, bool sky, bool darkSky, const float colour[3]) {
         RECT rectangle; GetClientRect(window,&rectangle);
         if (rectangle.right <= 0 || rectangle.bottom <= 0) return {};
         if (!swapchain) createSwapchain();
@@ -429,7 +429,7 @@ struct Renderer::Impl {
         const VkRect2D scissor{{0,0},extent};
         vkCmdSetViewport(command,0,1,&viewport); vkCmdSetScissor(command,0,1,&scissor);
         Parameters parameters{fah::viewProjection(angle,float(extent.width)/extent.height,radius),
-            {colour[0],colour[1],colour[2],1},{sky ? 1.f : 0.f,std::cos(angle),std::sin(angle),0}};
+            {colour[0],colour[1],colour[2],1},{sky ? (darkSky ? 2.f : 1.f) : 0.f,std::cos(angle),std::sin(angle),0}};
         vkCmdPushConstants(command,layout,VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(parameters),&parameters);
         vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,backgroundPipeline); vkCmdDraw(command,3,1,0,0);
         vkCmdBindPipeline(command,VK_PIPELINE_BIND_POINT_GRAPHICS,modelPipeline); geometry(atoms); geometry(bonds);
@@ -472,7 +472,7 @@ void Renderer::setScene(const fah::Scene& scene) {
     impl->atoms.instanceCount = std::uint32_t(scene.atoms.size()); impl->bonds.instanceCount = std::uint32_t(scene.bonds.size());
     impl->radius = scene.radius;
 }
-DrawTiming Renderer::draw(float angle,bool sky,const float colour[3]) { return impl->draw(angle,sky,colour); }
+DrawTiming Renderer::draw(float angle,bool sky,bool darkSky,const float colour[3]) { return impl->draw(angle,sky,darkSky,colour); }
 void Renderer::resize() { impl->resize(); }
 const std::string& Renderer::adapter() const { return impl->adapterName; }
 

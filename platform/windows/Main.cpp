@@ -66,11 +66,15 @@ std::string hexColour(const Options& options) {
     std::snprintf(value,sizeof(value),"%02x%02x%02x",int(options.colour[0]*255+.5f),int(options.colour[1]*255+.5f),int(options.colour[2]*255+.5f));
     return value;
 }
+std::string intervalText(double interval) {
+    std::ostringstream text; text << std::setprecision(15) << interval; return text.str();
+}
 Options preferences() {
     std::vector<std::string> arguments;
     const std::pair<const wchar_t*,const char*> entries[]{
         {L"Capture","--capture"},{L"Source","--source"},{L"Unit","--unit"},{L"FPS","--fps"},
-        {L"Style","--style"},{L"Playback","--playback"},{L"Background","--background"},{L"Colour","--colour"}};
+        {L"Style","--style"},{L"Playback","--playback"},{L"SnapshotInterval","--snapshot-interval"},
+        {L"Background","--background"},{L"Colour","--colour"}};
     for (const auto& entry : entries) {
         auto value = setting(entry.first);
         if (!value.empty()) { arguments.emplace_back(entry.second); arguments.push_back(std::move(value)); }
@@ -78,7 +82,8 @@ Options preferences() {
     return parseOptions(arguments);
 }
 
-enum Control { sourceControl=100,captureControl,unitControl,fpsControl,styleControl,playbackControl,backgroundControl,colourControl,browseControl };
+enum Control { sourceControl=100,captureControl,unitControl,fpsControl,styleControl,playbackControl,
+    backgroundControl,colourControl,browseControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits };
 struct Configuration { Options options; std::string error; };
 std::string controlText(HWND dialog,int identifier) {
     HWND control = GetDlgItem(dialog,identifier);
@@ -99,12 +104,17 @@ void combo(HWND dialog,int identifier,int y,const std::vector<const wchar_t*>& l
     for (auto label : labels) SendMessageW(list,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     SendMessageW(list,CB_SETCURSEL,selected,0);
 }
+void updateSnapshotIntervalControls(HWND dialog) {
+    const bool loop = SendDlgItemMessageW(dialog,playbackControl,CB_GETCURSEL,0,0) == 1;
+    for (int identifier : {snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits})
+        ShowWindow(GetDlgItem(dialog,identifier),loop ? SW_SHOW : SW_HIDE);
+}
 INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam) {
     auto* state = reinterpret_cast<Configuration*>(GetWindowLongPtrW(dialog,DWLP_USER));
     try {
         if (message == WM_INITDIALOG) {
             state = reinterpret_cast<Configuration*>(lparam); SetWindowLongPtrW(dialog,DWLP_USER,lparam);
-            SetWindowPos(dialog,nullptr,0,0,590,480,SWP_NOMOVE | SWP_NOZORDER);
+            SetWindowPos(dialog,nullptr,0,0,590,516,SWP_NOMOVE | SWP_NOZORDER);
             const auto& options = state->options;
             const auto label = [&](const wchar_t* text,int y) { control(dialog,L"STATIC",text,0,16,y+4,150,24,0); };
             label(L"Live source URL",18); control(dialog,L"EDIT",wide(options.source).c_str(),sourceControl,170,18,370,24,WS_TABSTOP | ES_AUTOHSCROLL);
@@ -115,13 +125,21 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
             label(L"Frame-rate limit",164); control(dialog,L"EDIT",wide(std::to_string(options.fps)).c_str(),fpsControl,170,164,90,24,WS_TABSTOP | ES_NUMBER);
             control(dialog,L"STATIC",L"fps (1–240; target 60)",0,272,168,260,24,0);
             label(L"Protein snapshots",200); combo(dialog,playbackControl,200,{L"Latest snapshot",L"Loop available snapshots"},options.loop ? 1 : 0);
-            label(L"Model style",236); combo(dialog,styleControl,236,{L"Space-filling",L"Ball-and-stick",L"Sticks",L"Cycle all three",L"Random"},options.style-1);
-            label(L"Background",272); combo(dialog,backgroundControl,272,{L"Sky and grid",L"Solid colour"},options.sky ? 0 : 1);
-            label(L"Solid colour (RGB)",308); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,308,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,338,370,24,0);
-            control(dialog,L"BUTTON",L"Save",IDOK,364,392,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
-            control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,392,82,28,WS_TABSTOP | BS_PUSHBUTTON);
+            control(dialog,L"STATIC",L"Snapshot interval",snapshotIntervalLabel,16,240,150,24,0);
+            control(dialog,L"EDIT",wide(intervalText(options.snapshotInterval)).c_str(),snapshotIntervalControl,170,236,90,24,WS_TABSTOP | ES_AUTOHSCROLL);
+            control(dialog,L"STATIC",L"seconds (0.05–60)",snapshotIntervalUnits,272,240,260,24,0);
+            updateSnapshotIntervalControls(dialog);
+            label(L"Model style",272); combo(dialog,styleControl,272,{L"Space-filling",L"Ball-and-stick",L"Sticks",L"Cycle all three",L"Random"},options.style-1);
+            label(L"Background",308); combo(dialog,backgroundControl,308,{L"Light sky and grid",L"Dark sky and grid",L"Solid colour"},options.sky ? (options.darkSky ? 1 : 0) : 2);
+            label(L"Solid colour (RGB)",344); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,344,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
+            control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,374,370,24,0);
+            control(dialog,L"STATIC",wide("Version " FAH_SAVER_VERSION).c_str(),0,16,434,300,24,0);
+            control(dialog,L"BUTTON",L"Save",IDOK,364,428,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
+            control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,428,82,28,WS_TABSTOP | BS_PUSHBUTTON);
             return TRUE;
+        }
+        if (message == WM_COMMAND && LOWORD(wparam) == playbackControl && HIWORD(wparam) == CBN_SELCHANGE) {
+            updateSnapshotIntervalControls(dialog); return TRUE;
         }
         if (message == WM_COMMAND && LOWORD(wparam) == browseControl) {
             wchar_t path[32768]{};
@@ -138,10 +156,16 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
             if (source.empty() && capture.empty()) throw std::runtime_error("Set a live source URL or select a capture file");
             const int style = int(SendDlgItemMessageW(dialog,styleControl,CB_GETCURSEL,0,0))+1;
             const std::string styleName = style == 4 ? "cycle" : style == 5 ? "random" : std::to_string(style);
-            const bool loop = SendDlgItemMessageW(dialog,playbackControl,CB_GETCURSEL,0,0) == 1;
-            const bool sky = SendDlgItemMessageW(dialog,backgroundControl,CB_GETCURSEL,0,0) == 0;
+            const auto playback = SendDlgItemMessageW(dialog,playbackControl,CB_GETCURSEL,0,0);
+            const auto background = SendDlgItemMessageW(dialog,backgroundControl,CB_GETCURSEL,0,0);
+            if (playback < 0 || playback > 1 || background < 0 || background > 2)
+                throw std::runtime_error("Select valid snapshot playback and background options");
+            const bool loop = playback == 1;
+            const std::string backgroundName = background == 0 ? "sky" : background == 1 ? "dark" : "solid";
             std::vector<std::string> arguments{"--fps",controlText(dialog,fpsControl),"--style",styleName,
-                "--playback",loop ? "loop" : "latest","--background",sky ? "sky" : "solid","--colour",controlText(dialog,colourControl)};
+                "--playback",loop ? "loop" : "latest","--snapshot-interval",
+                loop ? controlText(dialog,snapshotIntervalControl) : intervalText(state->options.snapshotInterval),
+                "--background",backgroundName,"--colour",controlText(dialog,colourControl)};
             if (!source.empty()) { arguments.emplace_back("--source"); arguments.push_back(source); }
             if (!capture.empty()) { arguments.emplace_back("--capture"); arguments.push_back(capture); }
             arguments.emplace_back("--unit"); arguments.push_back(controlText(dialog,unitControl));
@@ -150,7 +174,8 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
                 throw std::runtime_error("Source URL must begin with ws:// or wss://");
             store(L"Capture",capture); store(L"Source",source); store(L"Unit",state->options.unit);
             store(L"FPS",std::to_string(state->options.fps)); store(L"Style",styleName);
-            store(L"Playback",loop ? "loop" : "latest"); store(L"Background",sky ? "sky" : "solid");
+            store(L"Playback",loop ? "loop" : "latest");
+            store(L"SnapshotInterval",intervalText(state->options.snapshotInterval)); store(L"Background",backgroundName);
             store(L"Colour",hexColour(state->options));
             EndDialog(dialog,IDOK); return TRUE;
         }
@@ -281,7 +306,7 @@ struct App {
         if (options.seconds > 0 && elapsed >= options.seconds) { PostMessageW(window,WM_CLOSE,0,0); return; }
         if (IsIconic(window)) return;
         if (!capture.frames.empty()) {
-            const std::size_t frame = options.loop ? std::size_t(elapsed*10) % capture.frames.size() : capture.frames.size()-1;
+            const std::size_t frame = snapshotIndex(elapsed,capture.frames.size(),options);
             int style = options.style;
             const auto period = std::uint64_t(elapsed/10);
             if (style == 4) style = int(period%3)+1;
@@ -296,7 +321,7 @@ struct App {
                 lastRevision = revision; lastFrame = frame; lastStyle = style;
             }
         } else if (!redraw) return;
-        const auto timing = renderer->draw(float(elapsed*.2),options.sky,options.colour);
+        const auto timing = renderer->draw(float(elapsed*.2),options.sky,options.darkSky,options.colour);
         redraw = false;
         if (benchmark) {
             addPhase(fenceQueryWait,timing.fenceQueryWait); addPhase(acquire,timing.acquire);
@@ -322,6 +347,9 @@ struct App {
         if (!output) throw std::runtime_error("Cannot open metrics output file");
         output << std::setprecision(10) << "{\n  \"backend\":\"vulkan\",\n  \"adapter\":\"" << escaped(adapterName)
             << "\",\n  \"elapsed_seconds\":" << elapsed << ",\n  \"submitted_frames\":" << frameCount
+            << ",\n  \"snapshot_interval_seconds\":" << options.snapshotInterval
+            << ",\n  \"snapshot_playback\":\"" << (options.loop ? "loop" : "latest") << '"'
+            << ",\n  \"background\":\"" << (options.sky ? (options.darkSky ? "dark" : "sky") : "solid") << '"'
             << ",\n  \"submit_rate_fps\":" << (elapsed > 0 ? frameCount/elapsed : 0)
             << ",\n  \"cpu_process_seconds\":" << lifecycleEnd.processCPU-cpuStarted
             << ",\n  \"cpu_draw_call_mean_ms\":" << (frameCount ? cpuDrawTotal/frameCount : 0)

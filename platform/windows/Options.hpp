@@ -19,7 +19,9 @@ struct Options {
     double seconds = 0;
     int style = 1; // 4 cycles styles; 5 selects them at random.
     bool loop = false;
+    double snapshotInterval = .5;
     bool sky = true;
+    bool darkSky = false;
     bool fullscreen = false;
     float colour[3] = {.02f, .025f, .035f};
 };
@@ -75,10 +77,17 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
             if (value != "latest" && value != "loop")
                 throw std::runtime_error("Playback must be latest or loop");
             options.loop = value == "loop";
+        } else if (key == "--snapshot-interval") {
+            std::size_t end = 0;
+            options.snapshotInterval = std::stod(value, &end);
+            if (end != value.size() || !std::isfinite(options.snapshotInterval) ||
+                options.snapshotInterval < .05 || options.snapshotInterval > 60)
+                throw std::runtime_error("Snapshot interval must be between 0.05 and 60 seconds");
         } else if (key == "--background") {
-            if (value != "sky" && value != "solid")
-                throw std::runtime_error("Background must be sky or solid");
-            options.sky = value == "sky";
+            if (value != "sky" && value != "dark" && value != "solid")
+                throw std::runtime_error("Background must be sky, dark or solid");
+            options.sky = value != "solid";
+            options.darkSky = value == "dark";
         } else if (key == "--colour") colour(options, value);
         else if (key == "--fullscreen") {
             if (value != "true" && value != "false")
@@ -90,6 +99,11 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
     if ((selectedCapture && selectedSource) || (!options.source.empty() && !options.capture.empty()))
         throw std::runtime_error("Select either a live source or a capture file");
     return options;
+}
+
+inline std::size_t snapshotIndex(double elapsed, std::size_t count, const Options& options) {
+    if (!count) throw std::runtime_error("Cannot select a snapshot from an empty capture");
+    return options.loop ? std::size_t(elapsed / options.snapshotInterval) % count : count - 1;
 }
 
 } // namespace fah::windows

@@ -55,7 +55,7 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     void setScene(const fah::Scene& scene);
-    DrawTiming draw(float angle, bool sky, const float colour[3]);
+    DrawTiming draw(float angle, bool sky, bool darkSky, const float colour[3]);
     void resize();
     const std::string& adapter() const;
 private:
