@@ -414,7 +414,7 @@ struct App {
         else if (!options.source.empty()) {
             prepareCache();
             const HWND target = window;
-            source = fah::makeSource({options.source,options.unit},[this,target](fah::SourceEvent event) {
+            source = fah::makeSource({options.source,options.unit,!options.loop},[this,target](fah::SourceEvent event) {
                 auto value = std::make_unique<fah::SourceEvent>(std::move(event));
                 if (PostMessageW(target,sourceMessage,0,reinterpret_cast<LPARAM>(value.get()))) value.release();
                 else deliveryFailed = true;

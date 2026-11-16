@@ -41,6 +41,11 @@ configuration status instead.
 Live loop retention fails explicitly at 128 MiB of coordinates or 10,000
 snapshots. Latest mode retains one snapshot.
 
+When connecting in latest mode, older catch-up snapshots do not replace the
+displayed model. The source waits for FAH's newest published snapshot. The saved
+model, or normal connection status when no model is saved, remains visible until
+that snapshot arrives. Loop mode still receives the full available history.
+
 `--fullscreen true` runs the harness through the same full-screen host and input
 handlers as `/s`. It defaults to false and is not saved in preferences. Use
 `--seconds 5` for a bounded full-screen smoke test. Explicit durations must be
