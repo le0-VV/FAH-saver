@@ -71,6 +71,14 @@ static void expectWebFrame(FAHSaverView *view, std::size_t frames) {
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     check(finished && !failure && [metrics[@"draws"] unsignedIntegerValue] > 0 &&
           [metrics[@"snapshotCount"] unsignedIntegerValue] == frames,"Bundled Web renderer did not draw the cached/live model");
+    if (renderer.clock == FAHWebClock::Native) {
+        const auto submitted = [[renderer metrics][@"native_draw_submitted"] unsignedIntegerValue];
+        [view animateOneFrame];
+        while ([[renderer metrics][@"pending_native_frame"] boolValue] && NSProcessInfo.processInfo.systemUptime < deadline)
+            @autoreleasepool { [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]]; }
+        check([[renderer metrics][@"native_draw_submitted"] unsignedIntegerValue] > submitted &&
+              ![[renderer metrics][@"pending_native_frame"] boolValue],"ScreenSaverView did not drive its native Web frame clock");
+    }
 }
 
 int main(int argc, const char *argv[]) {

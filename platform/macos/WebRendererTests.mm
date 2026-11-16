@@ -4,14 +4,16 @@
 #include <functional>
 #include <limits>
 #include <stdexcept>
+#include <string>
 
 static void check(bool value,const char *message) {
     if (!value) throw std::runtime_error(message);
 }
 static void waitFor(const std::function<bool()>& condition,const char *message) {
     const double deadline = NSProcessInfo.processInfo.systemUptime+20;
-    while (!condition() && NSProcessInfo.processInfo.systemUptime < deadline)
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    while (!condition() && NSProcessInfo.processInfo.systemUptime < deadline) {
+        @autoreleasepool { [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]]; }
+    }
     check(condition(),message);
 }
 static void ready(FAHWebRenderer *renderer) {
@@ -23,7 +25,7 @@ static NSDictionary *evaluate(FAHWebRenderer *renderer,NSString *script) { @auto
     auto done = std::make_shared<bool>(false);
     __block id result;
     __block NSError *failure;
-    [renderer.webView evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+    [renderer evaluateRuntimeScript:script completion:^(id value,NSError *error) {
         result = value; failure = error; *done = true;
     }];
     waitFor([&]{return *done;},"Web renderer evaluation timed out");
@@ -37,13 +39,17 @@ static NSDictionary *draw(FAHWebRenderer *renderer,double seconds) {
 int main(int argc,const char *argv[]) {
     @autoreleasepool {
         try {
-            check(argc == 3,"Supply Web renderer assets and a capture fixture");
+            check(argc >= 3 && argc <= 5,"Supply assets, fixture, optional wk|legacy and optional native clock");
+            check(argc < 4 || std::string(argv[3]) == "legacy" || std::string(argv[3]) == "wk","Unknown test backend");
+            check(argc < 5 || std::string(argv[4]) == "native","Unknown test clock");
+            const auto backend = argc >= 4 && std::string(argv[3]) == "legacy" ? FAHWebBackend::Legacy : FAHWebBackend::WK;
+            const auto clock = argc == 5 ? FAHWebClock::Native : FAHWebClock::AnimationFrame;
             [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
             auto capture = std::make_shared<const fah::Capture>(fah::readCapture(argv[2]));
             check(capture->frames.size() == 2,"Web timing fixture must contain two frames");
             NSError *error = nil;
             FAHWebRenderer *renderer = [[FAHWebRenderer alloc] initWithAssetsURL:[NSURL fileURLWithPath:
-                [NSString stringWithUTF8String:argv[1]] isDirectory:YES] error:&error];
+                [NSString stringWithUTF8String:argv[1]] isDirectory:YES] backend:backend clock:clock error:&error];
             check(renderer != nil,"Could not create the Web renderer");
             NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,64,64)
                 styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
@@ -55,6 +61,27 @@ int main(int argc,const char *argv[]) {
             [renderer setOptions:options]; [renderer beginMeasurement]; [renderer start]; ready(renderer);
             check([evaluate(renderer,@"window.fahSaver.metrics()")[@"measurementElapsedSeconds"] doubleValue] > 0,
                   "Measurement requested before readiness was lost");
+            const NSUInteger initialDraws = [[renderer metrics][@"draws"] unsignedIntegerValue];
+            @autoreleasepool { [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.25]]; }
+            NSDictionary *rawStartup = evaluate(renderer,@"({runtime:window.fahSaver.metrics(),hidden:document.hidden,visibility:document.visibilityState,width:innerWidth,height:innerHeight,clientWidth:document.querySelector('canvas').clientWidth,clientHeight:document.querySelector('canvas').clientHeight,dpr:devicePixelRatio})");
+            NSDictionary *startup = @{@"native":[renderer metrics],@"javascript":rawStartup,
+                @"natural_draw_delta":@([rawStartup[@"runtime"][@"draws"] unsignedIntegerValue]-initialDraws)};
+            NSData *startupJSON = [NSJSONSerialization dataWithJSONObject:startup options:0 error:nil];
+            std::printf("Hidden startup: %s\n",[[[NSString alloc] initWithData:startupJSON encoding:NSUTF8StringEncoding] UTF8String]);
+            if (clock == FAHWebClock::Native) {
+                for (unsigned frame=0; frame<100; ++frame)
+                    check([renderer advanceTo:double(frame)/60],"Native clock rejected a monotonic elapsed time");
+                check([[renderer metrics][@"native_draw_submitted"] unsignedIntegerValue] == 1,
+                      "Native clock queued more than one asynchronous request");
+                waitFor([&]{return ![[renderer metrics][@"pending_native_frame"] boolValue];},"Native clock did not drain its coalesced frame");
+                check([[renderer metrics][@"native_draw_submitted"] unsignedIntegerValue] <= 2,
+                      "Native clock did not coalesce requests to the latest time");
+                NSDictionary *advanced = evaluate(renderer,@"window.fahSaver.metrics()");
+                check(std::abs([advanced[@"elapsedSeconds"] doubleValue]-99.0/60) < .0001 &&
+                      [advanced[@"measurementDraws"] unsignedIntegerValue] > 0 &&
+                      [advanced[@"rafCallbackCount"] unsignedIntegerValue] == 0,
+                      "Native clock lost the latest elapsed time, draw statistics or rAF isolation");
+            }
             for (double interval : {1.0,1.25,120.0}) {
                 options.snapshotInterval = interval; [renderer setOptions:options]; ready(renderer);
                 for (const auto sample : {std::pair<double,unsigned>{0,0},{interval-.001,0},{interval,1},{2*interval,0}})
@@ -119,17 +146,31 @@ int main(int argc,const char *argv[]) {
             [renderer setCapture:nullptr]; ready(renderer);
             check([evaluate(renderer,@"window.fahSaver.metrics()")[@"snapshotCount"] unsignedIntegerValue] == 0,
                   "Cleared source retained the previous model in WebKit");
+            if (clock == FAHWebClock::Native) {
+                check([renderer advanceTo:5],"Native clock rejected an elapsed time without a model");
+                [renderer setCapture:streaming]; ready(renderer);
+                check([evaluate(renderer,@"window.fahSaver.metrics()")[@"elapsedSeconds"] doubleValue] == 5 &&
+                      ![[renderer metrics][@"pending_native_frame"] boolValue],"First model arrival lost the retained native clock");
+                [renderer setCapture:nullptr]; ready(renderer);
+            }
             FAHWebRenderer *second = [[FAHWebRenderer alloc] initWithAssetsURL:[NSURL fileURLWithPath:
-                [NSString stringWithUTF8String:argv[1]] isDirectory:YES] error:&error];
+                [NSString stringWithUTF8String:argv[1]] isDirectory:YES] backend:backend clock:clock error:&error];
             @autoreleasepool { [host addSubview:[second prepareWithFrame:host.bounds]]; }
             [second setCapture:capture]; [second start]; ready(second);
             __weak WKWebsiteDataStore *sharedStore;
-            __weak WKWebView *old;
+            __weak NSView *old;
             @autoreleasepool {
-                WKWebsiteDataStore *store = renderer.webView.configuration.websiteDataStore;
-                check(!store.persistent && store == second.webView.configuration.websiteDataStore,
-                      "Concurrent renderers do not share one ephemeral session");
-                sharedStore = store; old = renderer.webView;
+                if (backend == FAHWebBackend::WK) {
+                    WKWebsiteDataStore *store = renderer.webView.configuration.websiteDataStore;
+                    check(!store.persistent && store == second.webView.configuration.websiteDataStore,
+                          "Concurrent renderers do not share one ephemeral session");
+                    sharedStore = store;
+                } else {
+                    id preferences = [renderer.presentationView valueForKey:@"preferences"];
+                    check([[preferences valueForKey:@"privateBrowsingEnabled"] boolValue] &&
+                          ![[preferences valueForKey:@"autosaves"] boolValue],"Legacy renderer did not enable private browsing");
+                }
+                old = renderer.presentationView;
             }
             check([draw(second,0)[@"snapshotCount"] unsignedIntegerValue] == 1 &&
                   [evaluate(renderer,@"window.fahSaver.metrics()")[@"snapshotCount"] unsignedIntegerValue] == 0,
@@ -146,7 +187,7 @@ int main(int argc,const char *argv[]) {
             waitFor([&]{return *cancelled;},"Cancelled fixed-time render never completed");
             check(cancelError != nil,"Old-page fixed-time render was accepted after stop");
             waitFor([&]{return old == nil;},"Stop retained the old WebView");
-            check(sharedStore != nil && second.ready && [draw(second,0)[@"draws"] unsignedIntegerValue] > 0,
+            check((backend != FAHWebBackend::WK || sharedStore != nil) && second.ready && [draw(second,0)[@"draws"] unsignedIntegerValue] > 0,
                   "Stopping one renderer destroyed the other renderer's session");
             @autoreleasepool { [host addSubview:[renderer prepareWithFrame:host.bounds]]; }
             [renderer setCapture:capture]; [renderer start]; ready(renderer);
@@ -163,7 +204,7 @@ int main(int argc,const char *argv[]) {
                   "Restart retained old-page metrics or measurement intent");
             @autoreleasepool { [renderer stop]; [second stop]; }
             waitFor([&]{return sharedStore == nil;},"Last renderer release retained the shared ephemeral session");
-            check(!renderer.webView && !renderer.ready && !second.webView,"Stopped renderers retain a page");
+            check(!renderer.presentationView && !renderer.ready && !second.presentationView,"Stopped renderers retain a page");
             check(!window.visible,"Web test displayed a window");
             for (double interval : {0.0,.049,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
                 options.snapshotInterval = interval; bool rejected = false;

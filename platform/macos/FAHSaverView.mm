@@ -107,7 +107,7 @@ static void cacheError(const std::string& message) {
 }
 
 @implementation FAHSaverView {
-    WKWebView *_webView;
+    NSView *_presentationView;
     FAHWebRenderer *_renderer;
     NSTextField *_status;
     NSUserDefaults *_defaults;
@@ -121,6 +121,7 @@ static void cacheError(const std::string& message) {
     NSString *_connectionStatus, *_configurationError;
     BOOL _resumeWhenPresented, _detachedFromSuperview;
     CGSize _lastDrawableSize;
+    double _nativeDrawEpoch;
     __weak NSWindow *_observedWindow;
     id _windowCloseObserver;
     id _workspaceSessionObserver;
@@ -159,9 +160,24 @@ static void cacheError(const std::string& message) {
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
     NSURL *assets = [[NSBundle bundleForClass:self.class] URLForResource:@"web" withExtension:nil];
-    _renderer = [[FAHWebRenderer alloc] initWithAssetsURL:assets error:&error];
+    #if FAH_WEB_LEGACY_CANDIDATE
+    const auto backend = FAHWebBackend::Legacy;
+#else
+    const auto backend = FAHWebBackend::WK;
+#endif
+#if FAH_WEB_NATIVE_CLOCK_EXPERIMENT
+    const auto clock = FAHWebClock::Native;
+#else
+    const auto clock = FAHWebClock::AnimationFrame;
+#endif
+    _renderer = [[FAHWebRenderer alloc] initWithAssetsURL:assets backend:backend clock:clock error:&error];
     __weak FAHSaverView *weakRendererOwner = self;
     _renderer.stateChanged = ^{ [weakRendererOwner updateStatus]; };
+#if FAH_WEB_DIAGNOSTICS
+    static os_log_t log = os_log_create("org.fahsaver.screensaver", "web-renderer");
+    os_log(log,"saver=%{public}p renderer=%{public}p event=saver-init preview=%{public}d",
+        (__bridge void *)self,(__bridge void *)_renderer,isPreview);
+#endif
     _status = [NSTextField wrappingLabelWithString:error.localizedDescription ?: @"Connecting to Folding@home…"];
     _status.textColor = NSColor.whiteColor;
     _status.drawsBackground = YES;
@@ -265,10 +281,10 @@ static void cacheError(const std::string& message) {
 - (NSDictionary *)renderMetrics {
     NSMutableDictionary *result = [[_renderer metrics] mutableCopy];
     const CGFloat scale = self.window ? self.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor;
-    const CGSize size = _webView ? CGSizeMake(_webView.bounds.size.width*scale,_webView.bounds.size.height*scale) : _lastDrawableSize;
+    const CGSize size = _presentationView ? CGSizeMake(_presentationView.bounds.size.width*scale,_presentationView.bounds.size.height*scale) : _lastDrawableSize;
     result[@"drawable_width"] = @(size.width);
     result[@"drawable_height"] = @(size.height);
-    result[@"drawing_mode"] = @"WebKit requestAnimationFrame";
+    result[@"drawing_mode"] = _renderer.clock == FAHWebClock::Native ? @"Native Web frame clock" : @"Web requestAnimationFrame";
     result[@"animation_callbacks"] = @(_animationCallbackCount-_measurementCallbackBaseline);
     result[@"model_available"] = @(_model.available());
     result[@"using_cached_model"] = @(_model.usingFallback());
@@ -332,6 +348,7 @@ static void cacheError(const std::string& message) {
     _connectionStatus = @"Connecting to Folding@home…";
     if (![self loadOptions]) { [self updateStatus]; return; }
     [self prepareCache];
+    _nativeDrawEpoch = NSProcessInfo.processInfo.systemUptime;
     [_renderer start];
     try {
         __weak FAHSaverView *weakSelf = self;
@@ -356,14 +373,18 @@ static void cacheError(const std::string& message) {
 - (void)animateOneFrame {
     if (!self.isAnimating) return;
     ++_animationCallbackCount;
+#if FAH_WEB_NATIVE_CLOCK_EXPERIMENT
+    [_renderer advanceTo:NSProcessInfo.processInfo.systemUptime-_nativeDrawEpoch];
+#else
     // WebKit owns its frame clock; this callback does not send JavaScript IPC.
+#endif
     [self updateStatus];
 }
 
 - (void)preparePresentationView {
-    if (_webView) return;
-    _webView = [_renderer prepareWithFrame:self.bounds];
-    [self addSubview:_webView positioned:NSWindowBelow relativeTo:_status];
+    if (_presentationView) return;
+    _presentationView = [_renderer prepareWithFrame:self.bounds];
+    [self addSubview:_presentationView positioned:NSWindowBelow relativeTo:_status];
 }
 
 - (void)stopAnimationResources {
@@ -378,13 +399,13 @@ static void cacheError(const std::string& message) {
         catch (const std::exception& exception) { cacheError(exception.what()); }
         _cache.reset();
     }
-    if (_webView) {
+    if (_presentationView) {
         const CGFloat scale = self.window ? self.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor;
-        _lastDrawableSize = CGSizeMake(_webView.bounds.size.width*scale,_webView.bounds.size.height*scale);
+        _lastDrawableSize = CGSizeMake(_presentationView.bounds.size.width*scale,_presentationView.bounds.size.height*scale);
     }
     [_renderer stop];
     [_renderer setCapture:nullptr];
-    _webView = nil;
+    _presentationView = nil;
 }
 
 - (void)stopAnimation {

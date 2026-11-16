@@ -9,12 +9,28 @@ target_include_directories(fah_web PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" PRIVATE 
 target_compile_options(fah_web PRIVATE -fobjc-arc -Wall -Wextra)
 target_link_libraries(fah_web PUBLIC fah_core "-framework AppKit" "-framework WebKit")
 
+option(FAH_WEB_LEGACY_CANDIDATE "Build the explicit legacy WebView saver candidate" OFF)
+option(FAH_WEB_DIAGNOSTICS "Log WebKit screensaver lifecycle events" OFF)
+option(FAH_WEB_NATIVE_CLOCK_EXPERIMENT "Experiment with native-driven Web frames" OFF)
+if(FAH_WEB_DIAGNOSTICS)
+    target_compile_definitions(fah_web PRIVATE FAH_WEB_DIAGNOSTICS=1)
+endif()
+
 add_executable(fah_macos_preview Preview.mm)
 target_compile_options(fah_macos_preview PRIVATE -fobjc-arc)
 target_link_libraries(fah_macos_preview PRIVATE fah_metal fah_source)
 
 add_library(FAHSaver MODULE FAHSaverView.mm)
 target_compile_options(FAHSaver PRIVATE -fobjc-arc)
+if(FAH_WEB_LEGACY_CANDIDATE)
+    target_compile_definitions(FAHSaver PRIVATE FAH_WEB_LEGACY_CANDIDATE=1)
+endif()
+if(FAH_WEB_DIAGNOSTICS)
+    target_compile_definitions(FAHSaver PRIVATE FAH_WEB_DIAGNOSTICS=1)
+endif()
+if(FAH_WEB_NATIVE_CLOCK_EXPERIMENT)
+    target_compile_definitions(FAHSaver PRIVATE FAH_WEB_NATIVE_CLOCK_EXPERIMENT=1)
+endif()
 target_link_libraries(FAHSaver PRIVATE fah_web fah_source "-framework ScreenSaver")
 set_target_properties(FAHSaver PROPERTIES
     BUNDLE TRUE
@@ -50,6 +66,14 @@ if(BUILD_TESTING)
     add_test(NAME mac_web_renderer COMMAND fah_macos_web_renderer_tests
         "${PROJECT_SOURCE_DIR}/benchmark/web" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic-small.json")
     set_tests_properties(mac_web_renderer PROPERTIES TIMEOUT 60)
+    add_test(NAME mac_web_renderer_legacy COMMAND fah_macos_web_renderer_tests
+        "${PROJECT_SOURCE_DIR}/benchmark/web" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic-small.json" legacy)
+    set_tests_properties(mac_web_renderer_legacy PROPERTIES TIMEOUT 60)
+    foreach(backend wk legacy)
+        add_test(NAME mac_web_renderer_${backend}_native COMMAND fah_macos_web_renderer_tests
+            "${PROJECT_SOURCE_DIR}/benchmark/web" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic-small.json" ${backend} native)
+        set_tests_properties(mac_web_renderer_${backend}_native PROPERTIES TIMEOUT 60)
+    endforeach()
     add_executable(fah_macos_session_lifecycle_tests SessionLifecycleTests.mm)
     target_compile_options(fah_macos_session_lifecycle_tests PRIVATE -fobjc-arc)
     target_link_libraries(fah_macos_session_lifecycle_tests PRIVATE fah_core

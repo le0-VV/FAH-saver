@@ -10,17 +10,17 @@ static void check(bool value, const char *message) {
     if (!value) throw std::runtime_error(message);
 }
 
-static void drain() {
+static void drain() { @autoreleasepool {
     [CATransaction flush];
     [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.06]];
-}
+}}
 
-static WKWebView *presentationView(FAHSaverView *view) {
-    WKWebView *found = nil;
+static NSView *presentationView(FAHSaverView *view) {
+    NSView *found = nil;
     for (NSView *child in view.subviews)
-        if ([child isKindOfClass:WKWebView.class]) {
+        if (([child isKindOfClass:WKWebView.class] || [child isKindOfClass:NSClassFromString(@"WebView")])) {
             check(found == nil,"A saver owns more than one presentation view");
-            found = (WKWebView *)child;
+            found = child;
         }
     return found;
 }
@@ -92,10 +92,10 @@ int main(int argc, const char *argv[]) {
                 @autoreleasepool { [view startAnimation]; drain(); }
                 const unsigned starts = counters->starts, stops = counters->stops;
                 NSDictionary *running = [view renderMetrics];
-                __weak WKWebView *oldView;
+                __weak NSView *oldView;
                 __weak CALayer *oldLayer;
                 @autoreleasepool {
-                    WKWebView *web = presentationView(view);
+                    NSView *web = presentationView(view);
                     check(web != nil,"Running saver lacks its presentation view");
                     oldView = web; oldLayer = web.layer;
                     if (cycle%3 == 0) view.hidden = YES;

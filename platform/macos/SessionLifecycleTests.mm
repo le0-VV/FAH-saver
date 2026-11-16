@@ -35,7 +35,7 @@ static void stopped(FAHSaverView *view) {
           "Dismissed session continues callbacks");
     check(![[view renderMetrics][@"cache_worker_active"] boolValue],"Dismissed session retains its cache worker");
     for (NSView *child in view.subviews)
-        check(![child isKindOfClass:WKWebView.class],"Dismissed session retains its presentation owner");
+        check(![child isKindOfClass:WKWebView.class] && ![child isKindOfClass:NSClassFromString(@"WebView")],"Dismissed session retains its presentation owner");
 }
 
 int main(int argc,const char *argv[]) {
