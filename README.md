@@ -78,6 +78,9 @@ Set the screensaver source to `ws://127.0.0.1:17396/api/websocket`. Keep the tun
 running while viewing. This route needs existing SSH access; it does not change
 FAH's listener. A direct private LAN or Tailscale connection is also supported
 when FAH is already configured to accept that connection.
+See the [direct-access setup](docs/direct-access.md) for listener, access-rule
+and Windows firewall requirements. macOS 0.1.1 uses direct source routing and
+reports HTTP upgrade errors explicitly.
 
 Capture only protein topology and coordinates for a repeatable rendering test:
 
