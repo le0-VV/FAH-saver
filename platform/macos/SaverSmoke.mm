@@ -114,14 +114,32 @@ int main(int argc, const char *argv[]) {
             NSUInteger frameCallbacks = 0;
             NSDictionary *modelMetadata = nil;
             if (!fullscreen) {
+                FAHSaverView *secondView = [[principal alloc] initWithFrame:NSMakeRect(-240,0,240,320)
+                    isPreview:NO preferences:defaults];
+                if (!secondView) throw std::runtime_error("Second saver view could not be created");
                 for (int cycle=0; cycle<10; ++cycle) {
                     [view startAnimation];
-                    if (view.hasActiveSource) throw std::runtime_error("Capture test unexpectedly started a network source");
-                    for (int index=0; index<3; ++index) [view animateOneFrame];
+                    [secondView startAnimation];
+                    if (view.hasActiveSource || secondView.hasActiveSource)
+                        throw std::runtime_error("Capture test unexpectedly started a network source");
+                    for (int index=0; index<3; ++index) {
+                        [view animateOneFrame];
+                        [secondView animateOneFrame];
+                    }
                     modelMetadata = [view renderMetrics];
                     [view stopAnimation];
                     if (view.isAnimating || view.hasActiveSource) throw std::runtime_error("Saver did not stop");
+                    const NSUInteger firstCallbacks = view.animationCallbackCount;
+                    const NSUInteger secondCallbacks = secondView.animationCallbackCount;
+                    if (!secondView.isAnimating) throw std::runtime_error("Stopping one view stopped the other");
                     [view animateOneFrame];
+                    [secondView animateOneFrame];
+                    if (view.animationCallbackCount != firstCallbacks ||
+                        secondView.animationCallbackCount != secondCallbacks+1)
+                        throw std::runtime_error("Saver view animation is not independent");
+                    [secondView stopAnimation];
+                    if (secondView.isAnimating || secondView.hasActiveSource)
+                        throw std::runtime_error("Second saver view did not stop");
                 }
             } else {
                 FAHSmokeWindow *window = [[FAHSmokeWindow alloc] initWithContentRect:frame
@@ -213,6 +231,7 @@ int main(int argc, const char *argv[]) {
                 @"screen_id": screen.deviceDescription[@"NSScreenNumber"],
                 @"screen_scale": @(screen.backingScaleFactor),
                 @"fullscreen": @(fullscreen), @"exit_reason": exitReason, @"elapsed_seconds": @(elapsed),
+                @"concurrent_view_lifecycle_checked": @(!fullscreen),
                 @"frame_callbacks": @(frameCallbacks), @"measured_seconds": @(measuredSeconds), @"synthetic_input_requested": @(testInput),
                 @"source_active_after_stop": @(view.hasActiveSource),
                 @"source_callbacks_before_drain": @(callbacksAfterStop), @"source_callbacks_after_drain": @(view.sourceCallbackCount),

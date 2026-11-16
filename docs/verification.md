@@ -76,6 +76,21 @@ request, UI testing stopped so they can check the installed saver. Temporary
 file probes were removed from the installed build; the original LAN source and
 other selected options were restored. True off-site operation remains untested.
 
+The user then confirmed that the system saver works, but the other display stays
+black. Read-only checks found two online, unmirrored displays, FAH Saver selected
+for all displays and no per-display overrides. Version 0.1.3 explicitly enables
+layer backing on the root ScreenSaverView before adding the Metal child view.
+This is a compositing candidate, not a confirmed resolution of the reported
+macOS 26 secondary-display bug [FB19206021](https://developer.apple.com/forums/thread/787444).
+[Apple's layer-backing contract](https://developer.apple.com/documentation/appkit/nsview/wantslayer)
+applies to a view and its descendants, rather than its ancestors.
+
+The hidden module host passed ten concurrent two-view lifecycle cycles: stopping
+one view left the other animating, both stopped cleanly, no source started and
+persistent settings stayed unchanged. This check submitted no display drawables
+and does not prove that the second physical display renders. Seven CTest checks
+also passed. Full-screen verification is left to the user.
+
 ## Windows
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a

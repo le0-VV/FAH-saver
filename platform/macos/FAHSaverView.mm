@@ -29,6 +29,8 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview preferences:(NSUserDefaults *)preferences {
     self = [super initWithFrame:frame isPreview:isPreview];
     if (!self) return nil;
+    // Keep the Metal child inside a layer-backed root when macOS composites each display.
+    self.wantsLayer = YES;
     _defaults = preferences ? preferences : [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
     [_defaults registerDefaults:@{ @"inputMode": @0,
         @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",

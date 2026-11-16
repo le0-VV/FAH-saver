@@ -67,7 +67,10 @@ python3 /path/to/source/platform/macos/test_cli.py ./platform/macos/fah_macos_pr
 ```
 
 The smoke host loads the actual module, checks its principal class and options
-sheet, then runs ten start/stop cycles. It uses a volatile `NSArgumentDomain`
+sheet, then runs ten start/stop cycles with two independent views of different
+sizes. Stopping one view must leave the other animating. This hidden check does
+not submit display drawables or establish multi-display presentation.
+It uses a volatile `NSArgumentDomain`
 preference override on an explicitly injected NSUserDefaults instance to select
 the capture file. Normal engine construction still uses ScreenSaverDefaults. Persistent settings must compare
 unchanged before and after each check, and no source callbacks may continue after
