@@ -1,5 +1,4 @@
 #import <AppKit/AppKit.h>
-#import <WebKit/WebKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <CommonCrypto/CommonDigest.h>
 #import "FAHRenderer.h"
@@ -54,11 +53,12 @@ static NSString *sha256(NSData *data) {
 
 @interface ECConfig : NSObject {
 @public
-    NSString *engine, *output, *status, *mode, *screenshot, *background, *captureHash;
+    NSString *engine, *webBackend, *output, *status, *mode, *screenshot, *background, *captureHash;
     NSURL *assets;
     NSArray<NSDictionary *> *layouts;
     FAHRenderOptions options;
     double warmup, measure, cooldown, fixedTime;
+    BOOL hiddenReference;
     std::shared_ptr<const fah::Capture> capture;
 }
 @end
@@ -66,11 +66,13 @@ static NSString *sha256(NSData *data) {
 
 static ECConfig *configuration(NSDictionary *raw) {
     require([raw isKindOfClass:NSDictionary.class],"Comparison configuration must be an object");
-    keys(raw,@[@"engine",@"capture",@"assets",@"width",@"height",@"layouts",@"warmupSeconds",@"measureSeconds",
+    keys(raw,@[@"engine",@"webBackend",@"capture",@"assets",@"width",@"height",@"layouts",@"warmupSeconds",@"measureSeconds",
                @"cooldownSeconds",@"style",@"fps",@"playback",@"snapshotIntervalSeconds",@"background",@"colour",
                @"collectMetrics",@"output",@"status",@"mode",@"screenshot",@"fixedTimeSeconds"]);
     ECConfig *c = [ECConfig new];
     c->engine = text(raw,@"engine",nil); require(c->engine&&[@[@"metal",@"web"] containsObject:c->engine],"Engine must be metal or web");
+    c->webBackend = text(raw,@"webBackend",@"wk");
+    require([@[@"wk",@"legacy"] containsObject:c->webBackend],"Web backend must be wk or legacy");
     c->mode = text(raw,@"mode",@"benchmark"); require([@[@"benchmark",@"screenshot"] containsObject:c->mode],"Mode must be benchmark or screenshot");
     NSString *capturePath = path(raw,@"capture",true); c->output = path(raw,@"output",true); c->status = path(raw,@"status",true);
     c->screenshot = path(raw,@"screenshot",[c->mode isEqual:@"screenshot"]);
@@ -121,9 +123,14 @@ static ECConfig *configuration(NSDictionary *raw) {
     c->captureHash = sha256(data); return c;
 }
 static ECConfig *readConfiguration(NSString *file) {
+    require(file.isAbsolutePath,"Comparison configuration path must be absolute");
     NSData *data = [NSData dataWithContentsOfFile:file]; require(data && data.length <= 65536,"Could not read a bounded comparison configuration");
     NSError *error = nil; NSDictionary *raw = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
     require(raw && !error,"Comparison configuration is invalid JSON"); return configuration(raw);
+}
+static void referenceMode(ECConfig *config) {
+    require([config->mode isEqual:@"screenshot"],"--render-reference requires screenshot mode");
+    config->hiddenReference=YES;
 }
 
 @class ECHarness;
@@ -197,7 +204,9 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (int)exitCode { return _exitCode; }
 - (NSDictionary *)statusRecord {
     NSMutableDictionary *value = [@{@"pid":@(getpid()),@"bundle_id":NSBundle.mainBundle.bundleIdentifier ?: @"",
-        @"engine":_config->engine,@"phase":_phase,@"uptime":@(now()),@"unix_time":@([NSDate date].timeIntervalSince1970)} mutableCopy];
+        @"engine":_config->engine,@"web_backend":[_config->engine isEqual:@"web"]?_config->webBackend:@"not_applicable",
+        @"execution_mode":_config->hiddenReference?@"hidden_reference_cli":@"windowed_app",
+        @"phase":_phase,@"uptime":@(now()),@"unix_time":@([NSDate date].timeIntervalSince1970)} mutableCopy];
     [value addEntriesFromDictionary:_times]; if(_failure)value[@"error"]=_failure; if(_cancelled)value[@"cancelled"]=@YES; return value;
 }
 - (void)phase:(NSString *)phase timestamp:(NSString *)key {
@@ -210,7 +219,8 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (void)launch {
     [self phase:@"loading" timestamp:@"loading_start_uptime"];
     __weak ECHarness *weakSelf=self;
-    _hardTimer=[NSTimer scheduledTimerWithTimeInterval:45+_config->warmup+_config->measure+_config->cooldown repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf fail:@"Comparison exceeded its bounded lifetime"];}];
+    const double activeBudget=[_config->mode isEqual:@"screenshot"]?0:_config->warmup+_config->measure;
+    _hardTimer=[NSTimer scheduledTimerWithTimeInterval:45+activeBudget+_config->cooldown repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf fail:@"Comparison exceeded its bounded lifetime"];}];
     NSArray<NSScreen *> *screens=NSScreen.screens; require(screens.count>0,"No display is available");
     for(NSDictionary *layout in _config->layouts) {
         NSUInteger index=[layout[@"screen"] unsignedIntegerValue]; require(index<screens.count,"Requested display is unavailable");
@@ -220,7 +230,9 @@ static NSNumber *draws(NSDictionary *metrics) {
         canvas.window=[[ECWindow alloc] initWithContentRect:NSMakeRect(0,0,width,height)
             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskFullSizeContentView
             backing:NSBackingStoreBuffered defer:NO screen:screen];
-        canvas.window.releasedWhenClosed=NO; canvas.window.title=[NSString stringWithFormat:@"FAH Engine Comparison — %@",_config->engine];
+        canvas.window.releasedWhenClosed=NO;
+        canvas.window.title=[NSString stringWithFormat:@"FAH Engine Comparison — %@%@",_config->engine,
+            [_config->engine isEqual:@"web"]?[@" / " stringByAppendingString:_config->webBackend]:@""];
         canvas.window.titlebarAppearsTransparent=YES; canvas.window.titleVisibility=NSWindowTitleHidden;
         canvas.window.delegate=self; canvas.window.escapeHandler=^{[weakSelf cancel:@"escape"];};
         const CGFloat offset=12*_canvases.count;
@@ -239,18 +251,19 @@ static NSNumber *draws(NSDictionary *metrics) {
             };
             view.delegate=canvas.driver;canvas.presentation=view;canvas.started=YES;
         } else {
-            NSError *error=nil;canvas.web=[[FAHWebRenderer alloc] initWithAssetsURL:_config->assets error:&error];
+            const FAHWebBackend backend=[_config->webBackend isEqual:@"legacy"]?FAHWebBackend::Legacy:FAHWebBackend::WK;
+            NSError *error=nil;canvas.web=[[FAHWebRenderer alloc] initWithAssetsURL:_config->assets backend:backend error:&error];
             require(canvas.web!=nil,"Web renderer could not be created");
             [canvas.web setOptions:_config->options];[canvas.web setCapture:_config->capture];
-            canvas.presentation=[canvas.web prepareWithFrame:NSMakeRect(0,0,width,height)];require(canvas.presentation!=nil,"WKWebView could not be created");
+            canvas.presentation=[canvas.web prepareWithFrame:NSMakeRect(0,0,width,height)];require(canvas.presentation!=nil,"Web presentation view could not be created");
             __weak ECCanvas *weakCanvas=canvas;
             canvas.web.stateChanged=^{ECHarness *owner=weakSelf;ECCanvas *item=weakCanvas;if(!owner||!item)return;
                 if(item.web.lastError.length)[owner fail:item.web.lastError];else[owner checkLoading];};
         }
         canvas.window.contentView=canvas.presentation;[_canvases addObject:canvas];
-        [canvas.window makeKeyAndOrderFront:nil];
+        if(!_config->hiddenReference)[canvas.window makeKeyAndOrderFront:nil];
     }
-    [NSApp activateIgnoringOtherApps:YES];
+    if(!_config->hiddenReference)[NSApp activateIgnoringOtherApps:YES];
     if([_config->engine isEqual:@"metal"] && ![_config->mode isEqual:@"screenshot"])
         _drawTimer=[NSTimer scheduledTimerWithTimeInterval:1.0/_config->options.fps repeats:YES block:^(NSTimer *timer){(void)timer;ECHarness *owner=weakSelf;if(!owner)return;for(ECCanvas *canvas in owner->_canvases)[(MTKView*)canvas.presentation draw];}];
     _loadingTimer=[NSTimer scheduledTimerWithTimeInterval:.025 repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf checkLoading];}];
@@ -269,9 +282,9 @@ static NSNumber *draws(NSDictionary *metrics) {
                 if(!canvas.ready && !canvas.sizing) {
                     canvas.sizing=YES;__weak ECHarness *weakSelf=self;
                     NSString *sizeScript=[self->_config->mode isEqual:@"screenshot"]?
-                        [NSString stringWithFormat:@"window.fahSaver.renderAt(%.17g);({width:document.querySelector('canvas').width,height:document.querySelector('canvas').height})",self->_config->fixedTime]:
+                        [NSString stringWithFormat:@"(()=>{window.fahSaver.renderAt(%.17g);return {width:document.querySelector('canvas').width,height:document.querySelector('canvas').height};})()",self->_config->fixedTime]:
                         @"({width:document.querySelector('canvas').width,height:document.querySelector('canvas').height})";
-                    @autoreleasepool {[canvas.web.webView evaluateJavaScript:sizeScript completionHandler:^(id result,NSError *error){
+                    @autoreleasepool {[canvas.web evaluateRuntimeScript:sizeScript completion:^(id result,NSError *error){
                         @autoreleasepool { ECHarness *owner=weakSelf;if(!owner)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web canvas dimensions are unavailable");
                             canvas.actualWidth=[result[@"width"] integerValue];canvas.actualHeight=[result[@"height"] integerValue];
                             require(canvas.actualWidth==[canvas.layout[@"width"] integerValue]&&canvas.actualHeight==[canvas.layout[@"height"] integerValue],"Web canvas dimensions do not match the requested layout");canvas.ready=YES;[owner checkLoading];}); }
@@ -329,7 +342,7 @@ static NSNumber *draws(NSDictionary *metrics) {
     _collectionTimer=[NSTimer scheduledTimerWithTimeInterval:3 repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf fail:@"Timed out collecting engine metrics"];}];
     for(ECCanvas *canvas in _canvases) {
         if(canvas.metal) {canvas.finalMetrics=canvas.metal.metrics;canvas.finalDraws=canvas.driver.submissions;canvas.finalUptime=now();if(--remaining==0)[self stopped];}
-        else @autoreleasepool {[canvas.web.webView evaluateJavaScript:@"window.fahSaver.stop();window.fahSaver.metrics()" completionHandler:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_terminal||owner->_cancelled)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web final metrics are unavailable");canvas.finalMetrics=result;canvas.finalDraws=draws(result).unsignedLongLongValue;canvas.finalUptime=now();if(--remaining==0)[owner stopped];});}}];}
+        else @autoreleasepool {[canvas.web evaluateRuntimeScript:@"(()=>{window.fahSaver.stop();return window.fahSaver.metrics();})()" completion:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_terminal||owner->_cancelled)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web final metrics are unavailable");canvas.finalMetrics=result;canvas.finalDraws=draws(result).unsignedLongLongValue;canvas.finalUptime=now();if(--remaining==0)[owner stopped];});}}];}
     }
 }
 - (void)releasePresentation {
@@ -366,7 +379,9 @@ static NSNumber *draws(NSDictionary *metrics) {
             @"cadence_scope":canvas.metal?@"Successful Metal command-buffer submissions; not display presentations":@"WebGL draw calls; not display presentations"}];
     }
     return @{@"harness":@"FAH matched windowed app comparison",@"pid":@(getpid()),@"bundle_id":NSBundle.mainBundle.bundleIdentifier?:@"",
-        @"engine":_config->engine,@"mode":_config->mode,@"capture_sha256":_config->captureHash,@"atoms":@(_config->capture->topology.atoms.size()),
+        @"engine":_config->engine,@"web_backend":[_config->engine isEqual:@"web"]?_config->webBackend:@"not_applicable",
+        @"mode":_config->mode,@"execution_mode":_config->hiddenReference?@"hidden_reference_cli":@"windowed_app",
+        @"capture_sha256":_config->captureHash,@"atoms":@(_config->capture->topology.atoms.size()),
         @"bonds":@(_config->capture->topology.bonds.size()),@"snapshots":@(_config->capture->frames.size()),@"style":@(static_cast<int>(_config->options.style)),
         @"fps_cap":@(_config->options.fps),@"background":_config->background,@"playback":_config->options.loop?@"loop":@"latest",
         @"snapshot_interval_seconds":@(_config->options.snapshotInterval),@"collect_metrics":@(_config->options.collectMetrics),
@@ -413,9 +428,9 @@ static NSNumber *draws(NSDictionary *metrics) {
             for(NSUInteger i=0;i<width*height;++i)std::swap(bitmap.bitmapData[4*i],bitmap.bitmapData[4*i+2]);
             NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];[self savePNG:png canvas:canvas];
         } else {
-            NSString *script=[NSString stringWithFormat:@"window.fahSaver.stop();window.fahSaver.renderAt(%.17g);({metrics:window.fahSaver.metrics(),png:document.querySelector('canvas').toDataURL('image/png')})",self->_config->fixedTime];
+            NSString *script=[NSString stringWithFormat:@"(()=>{window.fahSaver.stop();window.fahSaver.renderAt(%.17g);return {metrics:window.fahSaver.metrics(),png:document.querySelector('canvas').toDataURL('image/png')};})()",self->_config->fixedTime];
             __weak ECHarness *weakSelf=self;
-            @autoreleasepool {[canvas.web.webView evaluateJavaScript:script completionHandler:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web fixed render failed");NSString *url=result[@"png"];require([url isKindOfClass:NSString.class]&&[url hasPrefix:@"data:image/png;base64,"],"Web canvas did not produce PNG data");canvas.finalMetrics=result[@"metrics"];NSData *png=[[NSData alloc]initWithBase64EncodedString:[url substringFromIndex:22] options:0];[owner savePNG:png canvas:canvas];});}}];}
+            @autoreleasepool {[canvas.web evaluateRuntimeScript:script completion:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web fixed render failed");NSString *url=result[@"png"];require([url isKindOfClass:NSString.class]&&[url hasPrefix:@"data:image/png;base64,"],"Web canvas did not produce PNG data");canvas.finalMetrics=result[@"metrics"];NSData *png=[[NSData alloc]initWithBase64EncodedString:[url substringFromIndex:22] options:0];[owner savePNG:png canvas:canvas];});}}];}
         }
     });
 }
@@ -440,8 +455,17 @@ static int selfTest() {
         NSString *fixture=[directory stringByAppendingPathComponent:@"fixture.json"];
         [@"{\"topology\":{\"atoms\":[[\"C\"]],\"bonds\":[]},\"frames\":[[[0,0,0]]]}" writeToFile:fixture atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSMutableDictionary *base=[@{@"engine":@"metal",@"capture":fixture,@"output":[directory stringByAppendingPathComponent:@"out.json"],@"status":[directory stringByAppendingPathComponent:@"status.json"]} mutableCopy];
-        ECConfig *valid=configuration(base);require(valid->layouts.count==1&&valid->options.fps==60&&valid->warmup==10&&valid->measure==30&&valid->cooldown==10,"Comparison defaults changed");
-        for(NSDictionary *change in @[@{@"engine":@"browser"},@{@"fps":@60.5},@{@"style":@4},@{@"layouts":@[]},@{@"measureSeconds":@0},@{@"warmupSeconds":@(-1)},@{@"cooldownSeconds":@(-1)},@{@"collectMetrics":@1},@{@"background":@"other"},@{@"snapshotIntervalSeconds":@0},@{@"output":fixture},@{@"width":@4097},@{@"unexpected":@1}]) {
+        ECConfig *valid=configuration(base);require(valid->layouts.count==1&&valid->options.fps==60&&valid->warmup==10&&valid->measure==30&&valid->cooldown==10&&[valid->webBackend isEqual:@"wk"],"Comparison defaults changed");
+        for(NSString *backend in @[@"wk",@"legacy"]) {
+            NSMutableDictionary *selected=[base mutableCopy];selected[@"webBackend"]=backend;
+            require([configuration(selected)->webBackend isEqual:backend],"Explicit Web backend selection changed");
+        }
+        bool rejectedReference=false;try{referenceMode(valid);}catch(const std::runtime_error&){rejectedReference=true;}
+        require(rejectedReference,"Hidden reference mode accepted a benchmark configuration");
+        NSMutableDictionary *reference=[base mutableCopy];reference[@"mode"]=@"screenshot";reference[@"screenshot"]=[directory stringByAppendingPathComponent:@"reference.png"];
+        ECConfig *referenceConfig=configuration(reference);referenceMode(referenceConfig);
+        require(referenceConfig->hiddenReference,"Screenshot reference mode was not applied");
+        for(NSDictionary *change in @[@{@"engine":@"browser"},@{@"webBackend":@"auto"},@{@"webBackend":@1},@{@"fps":@60.5},@{@"style":@4},@{@"layouts":@[]},@{@"measureSeconds":@0},@{@"warmupSeconds":@(-1)},@{@"cooldownSeconds":@(-1)},@{@"collectMetrics":@1},@{@"background":@"other"},@{@"snapshotIntervalSeconds":@0},@{@"output":fixture},@{@"width":@4097},@{@"unexpected":@1}]) {
             NSMutableDictionary *bad=[base mutableCopy];[bad addEntriesFromDictionary:change];bool failed=false;try{configuration(bad);}catch(const std::runtime_error&){failed=true;}require(failed,"Invalid comparison config was accepted");
         }
         [base addEntriesFromDictionary:@{@"layouts":@[@{@"width":@2880,@"height":@1800,@"screen":@0},@{@"width":@1920,@"height":@1080,@"screen":@1}],@"playback":@"loop",@"collectMetrics":@YES}];
@@ -453,13 +477,14 @@ static int selfTest() {
 int main(int argc,const char *argv[]) {
     @autoreleasepool {
         try {
-            if(argc==2&&std::string(argv[1])=="--help") {std::puts("FAHEngineComparison.app reads Resources/Comparison.json when launched normally.\n--validate-config ABS_JSON validates without creating UI.\n--self-test-config runs bounded configuration checks without creating UI.");return 0;}
+            if(argc==2&&std::string(argv[1])=="--help") {std::puts("FAHEngineComparison.app reads Resources/Comparison.json when launched normally.\n--validate-config ABS_JSON validates without creating UI.\n--self-test-config runs bounded configuration checks without creating UI.\n--render-reference ABS_JSON requires screenshot mode; renders using unshown views without ordering or activating windows. This is not a responsibility/performance comparison.");return 0;}
             if(argc==2&&std::string(argv[1])=="--self-test-config")return selfTest();
             if(argc==3&&std::string(argv[1])=="--validate-config") {ECConfig *config=readConfiguration([NSString stringWithUTF8String:argv[2]]);std::printf("Comparison config valid: engine=%s views=%lu atoms=%lu frames=%lu\n",config->engine.UTF8String,(unsigned long)config->layouts.count,(unsigned long)config->capture->topology.atoms.size(),(unsigned long)config->capture->frames.size());return 0;}
-            require(argc==1,"Use the bundled Comparison.json or a documented validation option");
-            ECConfig *config;@autoreleasepool{config=readConfiguration([NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Comparison.json"]);}
-            [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-            NSMenu *menu=[NSMenu new];NSMenuItem *appItem=[NSMenuItem new];[menu addItem:appItem];NSMenu *appMenu=[NSMenu new];[appMenu addItemWithTitle:@"Quit Engine Comparison" action:@selector(terminate:) keyEquivalent:@"q"];appItem.submenu=appMenu;NSApp.mainMenu=menu;
+            const bool hidden=argc==3&&std::string(argv[1])=="--render-reference";
+            require(argc==1||hidden,"Use the bundled Comparison.json or a documented option");
+            ECConfig *config;@autoreleasepool{config=readConfiguration(hidden?[NSString stringWithUTF8String:argv[2]]:[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Comparison.json"]);if(hidden)referenceMode(config);}
+            [NSApplication sharedApplication];[NSApp setActivationPolicy:hidden?NSApplicationActivationPolicyProhibited:NSApplicationActivationPolicyRegular];
+            if(!hidden){NSMenu *menu=[NSMenu new];NSMenuItem *appItem=[NSMenuItem new];[menu addItem:appItem];NSMenu *appMenu=[NSMenu new];[appMenu addItemWithTitle:@"Quit Engine Comparison" action:@selector(terminate:) keyEquivalent:@"q"];appItem.submenu=appMenu;NSApp.mainMenu=menu;}
             ECHarness *owner=[[ECHarness alloc]initWithConfig:config];NSApp.delegate=owner;[NSApp run];return owner.exitCode;
         } catch(const std::exception& error){std::fprintf(stderr,"EngineComparison: %s\n",error.what());return 2;}
     }
