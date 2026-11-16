@@ -53,7 +53,7 @@ static NSString *sha256(NSData *data) {
 
 @interface ECConfig : NSObject {
 @public
-    NSString *engine, *webBackend, *output, *status, *mode, *screenshot, *background, *captureHash;
+    NSString *engine, *webBackend, *webClock, *output, *status, *mode, *screenshot, *background, *captureHash;
     NSURL *assets;
     NSArray<NSDictionary *> *layouts;
     FAHRenderOptions options;
@@ -66,13 +66,15 @@ static NSString *sha256(NSData *data) {
 
 static ECConfig *configuration(NSDictionary *raw) {
     require([raw isKindOfClass:NSDictionary.class],"Comparison configuration must be an object");
-    keys(raw,@[@"engine",@"webBackend",@"capture",@"assets",@"width",@"height",@"layouts",@"warmupSeconds",@"measureSeconds",
+    keys(raw,@[@"engine",@"webBackend",@"webClock",@"capture",@"assets",@"width",@"height",@"layouts",@"warmupSeconds",@"measureSeconds",
                @"cooldownSeconds",@"style",@"fps",@"playback",@"snapshotIntervalSeconds",@"background",@"colour",
                @"collectMetrics",@"output",@"status",@"mode",@"screenshot",@"fixedTimeSeconds"]);
     ECConfig *c = [ECConfig new];
     c->engine = text(raw,@"engine",nil); require(c->engine&&[@[@"metal",@"web"] containsObject:c->engine],"Engine must be metal or web");
     c->webBackend = text(raw,@"webBackend",@"wk");
     require([@[@"wk",@"legacy"] containsObject:c->webBackend],"Web backend must be wk or legacy");
+    c->webClock = text(raw,@"webClock",@"raf");
+    require([@[@"raf",@"native"] containsObject:c->webClock],"Web clock must be raf or native");
     c->mode = text(raw,@"mode",@"benchmark"); require([@[@"benchmark",@"screenshot"] containsObject:c->mode],"Mode must be benchmark or screenshot");
     NSString *capturePath = path(raw,@"capture",true); c->output = path(raw,@"output",true); c->status = path(raw,@"status",true);
     c->screenshot = path(raw,@"screenshot",[c->mode isEqual:@"screenshot"]);
@@ -172,9 +174,11 @@ static void referenceMode(ECConfig *config) {
 @property(strong) ECMetalDriver *driver;
 @property(strong) FAHWebRenderer *web;
 @property(strong) NSDictionary *layout, *baseline, *finalMetrics, *failureState;
-@property double scale, baselineUptime, finalUptime;
+@property double scale, baselineUptime, finalUptime, clockEpoch;
 @property NSInteger actualWidth, actualHeight;
 @property unsigned long long baselineDraws, finalDraws;
+@property unsigned long long nativeClockRequests, nativeClockAccepted;
+@property unsigned long long baselineClockRequests, baselineClockAccepted, finalClockRequests, finalClockAccepted;
 @property BOOL ready, started, sizing, finalMetricsFromFailureCache;
 @end
 @implementation ECCanvas @end
@@ -206,6 +210,7 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (NSDictionary *)statusRecord {
     NSMutableDictionary *value = [@{@"pid":@(getpid()),@"bundle_id":NSBundle.mainBundle.bundleIdentifier ?: @"",
         @"engine":_config->engine,@"web_backend":[_config->engine isEqual:@"web"]?_config->webBackend:@"not_applicable",
+        @"web_clock":[_config->engine isEqual:@"web"]?_config->webClock:@"not_applicable",
         @"execution_mode":_config->hiddenReference?@"hidden_reference_cli":@"windowed_app",
         @"phase":_phase,@"uptime":@(now()),@"unix_time":@([NSDate date].timeIntervalSince1970)} mutableCopy];
     [value addEntriesFromDictionary:_times]; if(_failure)value[@"error"]=_failure; if(_cancelled)value[@"cancelled"]=@YES;
@@ -218,6 +223,7 @@ static NSNumber *draws(NSDictionary *metrics) {
         @"presentation_present":@(canvas.presentation!=nil),@"presentation_hidden":@(canvas.presentation.isHiddenOrHasHiddenAncestor),
         @"presentation_has_window":@(canvas.presentation.window!=nil),@"presentation_width_points":@(bounds.size.width),
         @"presentation_height_points":@(bounds.size.height),@"metal_submissions":@(canvas.driver.submissions),
+        @"native_clock_requests":@(canvas.nativeClockRequests),@"native_clock_accepted":@(canvas.nativeClockAccepted),
         @"metrics":canvas.web?canvas.web.metrics:(canvas.metal.metrics?:@{})};
 }
 - (void)publishLoadingDiagnostics {
@@ -291,7 +297,8 @@ static NSNumber *draws(NSDictionary *metrics) {
             view.delegate=canvas.driver;canvas.presentation=view;canvas.started=YES;
         } else {
             const FAHWebBackend backend=[_config->webBackend isEqual:@"legacy"]?FAHWebBackend::Legacy:FAHWebBackend::WK;
-            NSError *error=nil;canvas.web=[[FAHWebRenderer alloc] initWithAssetsURL:_config->assets backend:backend error:&error];
+            const FAHWebClock clock=[_config->webClock isEqual:@"native"]?FAHWebClock::Native:FAHWebClock::AnimationFrame;
+            NSError *error=nil;canvas.web=[[FAHWebRenderer alloc] initWithAssetsURL:_config->assets backend:backend clock:clock error:&error];
             require(canvas.web!=nil,"Web renderer could not be created");
             [canvas.web setOptions:_config->options];[canvas.web setCapture:_config->capture];
             canvas.presentation=[canvas.web prepareWithFrame:NSMakeRect(0,0,width,height)];require(canvas.presentation!=nil,"Web presentation view could not be created");
@@ -303,10 +310,22 @@ static NSNumber *draws(NSDictionary *metrics) {
         if(!_config->hiddenReference)[canvas.window makeKeyAndOrderFront:nil];
     }
     if(!_config->hiddenReference)[NSApp activateIgnoringOtherApps:YES];
-    if([_config->engine isEqual:@"metal"] && ![_config->mode isEqual:@"screenshot"])
-        _drawTimer=[NSTimer scheduledTimerWithTimeInterval:1.0/_config->options.fps repeats:YES block:^(NSTimer *timer){(void)timer;ECHarness *owner=weakSelf;if(!owner)return;for(ECCanvas *canvas in owner->_canvases)[(MTKView*)canvas.presentation draw];}];
+    if(([_config->engine isEqual:@"metal"]||[_config->webClock isEqual:@"native"]) && ![_config->mode isEqual:@"screenshot"])
+        _drawTimer=[NSTimer scheduledTimerWithTimeInterval:1.0/_config->options.fps repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf drawClockFrame];}];
     _loadingTimer=[NSTimer scheduledTimerWithTimeInterval:.025 repeats:YES block:^(NSTimer *timer){(void)timer;[weakSelf checkLoading];}];
     [self checkLoading];
+}
+- (void)drawClockFrame {
+    if(_finishing||_terminal)return;
+    protect(self,^{const double timestamp=now();
+        for(ECCanvas *canvas in self->_canvases) {
+            if(canvas.metal)[(MTKView*)canvas.presentation draw];
+            else if(canvas.started&&canvas.web.ready) {
+                ++canvas.nativeClockRequests;
+                if([canvas.web advanceTo:std::max(0.0,timestamp-canvas.clockEpoch)])++canvas.nativeClockAccepted;
+            }
+        }
+    });
 }
 - (void)checkLoading {
     if(![_phase isEqual:@"loading"] || _finishing)return;
@@ -316,7 +335,7 @@ static NSNumber *draws(NSDictionary *metrics) {
             if(canvas.web) {
                 if(canvas.web.lastError.length){[self fail:canvas.web.lastError];return;}
                 if(!canvas.web.ready || [canvas.web.metrics[@"pending_updates"] boolValue]) {all=NO;continue;}
-                if(!canvas.started && [self->_config->mode isEqual:@"benchmark"]) {[canvas.web start];canvas.started=YES;all=NO;continue;}
+                if(!canvas.started && [self->_config->mode isEqual:@"benchmark"]) {canvas.clockEpoch=now();[canvas.web start];canvas.started=YES;all=NO;continue;}
                 if([self->_config->mode isEqual:@"benchmark"]&&[canvas.web.metrics[@"draws"] unsignedLongLongValue]==0){all=NO;continue;}
                 if(!canvas.ready && !canvas.sizing) {
                     canvas.sizing=YES;__weak ECHarness *weakSelf=self;
@@ -365,7 +384,7 @@ static NSNumber *draws(NSDictionary *metrics) {
             canvas.baseline=canvas.metal.metrics;canvas.baselineDraws=canvas.driver.submissions;canvas.baselineUptime=now();
             if(--remaining==0)[self measurementReady];
         } else {
-            @autoreleasepool {[canvas.web refreshMetrics:^(NSDictionary *metrics){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_finishing)return;protect(owner,^{canvas.baseline=metrics;canvas.baselineDraws=draws(metrics).unsignedLongLongValue;canvas.baselineUptime=now();if(--remaining==0)[owner measurementReady];});}}];}
+            @autoreleasepool {[canvas.web refreshMetrics:^(NSDictionary *metrics){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_finishing)return;protect(owner,^{canvas.baseline=metrics;canvas.baselineDraws=draws(metrics).unsignedLongLongValue;canvas.baselineUptime=now();canvas.baselineClockRequests=canvas.nativeClockRequests;canvas.baselineClockAccepted=canvas.nativeClockAccepted;if(--remaining==0)[owner measurementReady];});}}];}
         }
     }
 }
@@ -377,11 +396,24 @@ static NSNumber *draws(NSDictionary *metrics) {
     if(_finishing)return;_finishing=YES;_times[@"measurement_end_uptime"]=@(now());
     protect(self,^{[self phase:@"measurement" timestamp:nil];});
     if(_terminal)return;
-    [_drawTimer invalidate];_drawTimer=nil;__block NSUInteger remaining=_canvases.count;__weak ECHarness *weakSelf=self;
+    [_drawTimer invalidate];_drawTimer=nil;__weak ECHarness *weakSelf=self;
     _collectionTimer=[NSTimer scheduledTimerWithTimeInterval:3 repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf fail:@"Timed out collecting engine metrics"];}];
+    if([_config->engine isEqual:@"web"]&&[_config->webClock isEqual:@"native"]) {
+        _loadingTimer=[NSTimer scheduledTimerWithTimeInterval:.005 repeats:YES block:^(NSTimer *timer){(void)timer;ECHarness *owner=weakSelf;if(!owner)return;
+            protect(owner,^{for(ECCanvas *canvas in owner->_canvases) {
+                NSDictionary *state=canvas.web.metrics;
+                require([state[@"pending_native_frame"] isKindOfClass:NSNumber.class],"Web native-clock pending state is unavailable");
+                if([state[@"pending_updates"] boolValue]||[state[@"pending_native_frame"] boolValue])return;
+            }
+            [owner->_loadingTimer invalidate];owner->_loadingTimer=nil;[owner collectFinalMetrics];});}];
+    } else [self collectFinalMetrics];
+}
+- (void)collectFinalMetrics {
+    if(_terminal||_cancelled)return;
+    __block NSUInteger remaining=_canvases.count;__weak ECHarness *weakSelf=self;
     for(ECCanvas *canvas in _canvases) {
         if(canvas.metal) {canvas.finalMetrics=canvas.metal.metrics;canvas.finalDraws=canvas.driver.submissions;canvas.finalUptime=now();if(--remaining==0)[self stopped];}
-        else @autoreleasepool {[canvas.web evaluateRuntimeScript:@"(()=>{window.fahSaver.stop();return window.fahSaver.metrics();})()" completion:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_terminal||owner->_cancelled)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web final metrics are unavailable");canvas.finalMetrics=result;canvas.finalDraws=draws(result).unsignedLongLongValue;canvas.finalUptime=now();if(--remaining==0)[owner stopped];});}}];}
+        else @autoreleasepool {[canvas.web evaluateRuntimeScript:@"(()=>{window.fahSaver.stop();return window.fahSaver.metrics();})()" completion:^(id result,NSError *error){@autoreleasepool {ECHarness *owner=weakSelf;if(!owner||owner->_terminal||owner->_cancelled)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web final metrics are unavailable");canvas.finalMetrics=result;canvas.finalDraws=draws(result).unsignedLongLongValue;canvas.finalUptime=now();canvas.finalClockRequests=canvas.nativeClockRequests;canvas.finalClockAccepted=canvas.nativeClockAccepted;if(--remaining==0)[owner stopped];});}}];}
     }
 }
 - (void)releasePresentation {
@@ -416,12 +448,17 @@ static NSNumber *draws(NSDictionary *metrics) {
         [views addObject:@{@"layout":canvas.layout,@"backing_scale":@(canvas.scale),@"actual_width":@(canvas.actualWidth),@"actual_height":@(canvas.actualHeight),@"baseline":canvas.baseline?:@{},@"final":canvas.finalMetrics?:@{},
             @"final_metrics_source":canvas.finalMetricsFromFailureCache?@"cached_before_failure":(canvas.finalMetrics?@"normal_collection":@"unavailable"),
             @"failure_state_before_release":canvas.failureState?:@{},
+            @"native_clock_requests":@(canvas.nativeClockRequests),@"native_clock_accepted":@(canvas.nativeClockAccepted),
+            @"measured_native_clock_requests":@(canvas.finalClockRequests>=canvas.baselineClockRequests?canvas.finalClockRequests-canvas.baselineClockRequests:0),
+            @"measured_native_clock_accepted":@(canvas.finalClockAccepted>=canvas.baselineClockAccepted?canvas.finalClockAccepted-canvas.baselineClockAccepted:0),
+            @"native_clock_counter_scope":@"Accepted means queued/coalesced JavaScript work, not completed GPU frames",
             @"draw_count":@(delta),@"draw_count_elapsed_seconds":@(std::max(0.0,seconds)),
             @"draw_count_rate":@(seconds>0?delta/seconds:0),
             @"cadence_scope":canvas.metal?@"Successful Metal command-buffer submissions; not display presentations":@"WebGL draw calls; not display presentations"}];
     }
     return @{@"harness":@"FAH matched windowed app comparison",@"pid":@(getpid()),@"bundle_id":NSBundle.mainBundle.bundleIdentifier?:@"",
         @"engine":_config->engine,@"web_backend":[_config->engine isEqual:@"web"]?_config->webBackend:@"not_applicable",
+        @"web_clock":[_config->engine isEqual:@"web"]?_config->webClock:@"not_applicable",
         @"mode":_config->mode,@"execution_mode":_config->hiddenReference?@"hidden_reference_cli":@"windowed_app",
         @"capture_sha256":_config->captureHash,@"atoms":@(_config->capture->topology.atoms.size()),
         @"bonds":@(_config->capture->topology.bonds.size()),@"snapshots":@(_config->capture->frames.size()),@"style":@(static_cast<int>(_config->options.style)),
@@ -501,17 +538,21 @@ static int selfTest() {
         NSString *fixture=[directory stringByAppendingPathComponent:@"fixture.json"];
         [@"{\"topology\":{\"atoms\":[[\"C\"]],\"bonds\":[]},\"frames\":[[[0,0,0]]]}" writeToFile:fixture atomically:YES encoding:NSUTF8StringEncoding error:nil];
         NSMutableDictionary *base=[@{@"engine":@"metal",@"capture":fixture,@"output":[directory stringByAppendingPathComponent:@"out.json"],@"status":[directory stringByAppendingPathComponent:@"status.json"]} mutableCopy];
-        ECConfig *valid=configuration(base);require(valid->layouts.count==1&&valid->options.fps==60&&valid->warmup==10&&valid->measure==30&&valid->cooldown==10&&[valid->webBackend isEqual:@"wk"],"Comparison defaults changed");
+        ECConfig *valid=configuration(base);require(valid->layouts.count==1&&valid->options.fps==60&&valid->warmup==10&&valid->measure==30&&valid->cooldown==10&&[valid->webBackend isEqual:@"wk"]&&[valid->webClock isEqual:@"raf"],"Comparison defaults changed");
         for(NSString *backend in @[@"wk",@"legacy"]) {
             NSMutableDictionary *selected=[base mutableCopy];selected[@"webBackend"]=backend;
             require([configuration(selected)->webBackend isEqual:backend],"Explicit Web backend selection changed");
+        }
+        for(NSString *clock in @[@"raf",@"native"]) {
+            NSMutableDictionary *selected=[base mutableCopy];selected[@"webClock"]=clock;
+            require([configuration(selected)->webClock isEqual:clock],"Explicit Web clock selection changed");
         }
         bool rejectedReference=false;try{referenceMode(valid);}catch(const std::runtime_error&){rejectedReference=true;}
         require(rejectedReference,"Hidden reference mode accepted a benchmark configuration");
         NSMutableDictionary *reference=[base mutableCopy];reference[@"mode"]=@"screenshot";reference[@"screenshot"]=[directory stringByAppendingPathComponent:@"reference.png"];
         ECConfig *referenceConfig=configuration(reference);referenceMode(referenceConfig);
         require(referenceConfig->hiddenReference,"Screenshot reference mode was not applied");
-        for(NSDictionary *change in @[@{@"engine":@"browser"},@{@"webBackend":@"auto"},@{@"webBackend":@1},@{@"fps":@60.5},@{@"style":@4},@{@"layouts":@[]},@{@"measureSeconds":@0},@{@"warmupSeconds":@(-1)},@{@"cooldownSeconds":@(-1)},@{@"collectMetrics":@1},@{@"background":@"other"},@{@"snapshotIntervalSeconds":@0},@{@"output":fixture},@{@"width":@4097},@{@"unexpected":@1}]) {
+        for(NSDictionary *change in @[@{@"engine":@"browser"},@{@"webBackend":@"auto"},@{@"webBackend":@1},@{@"webClock":@"auto"},@{@"webClock":@1},@{@"fps":@60.5},@{@"style":@4},@{@"layouts":@[]},@{@"measureSeconds":@0},@{@"warmupSeconds":@(-1)},@{@"cooldownSeconds":@(-1)},@{@"collectMetrics":@1},@{@"background":@"other"},@{@"snapshotIntervalSeconds":@0},@{@"output":fixture},@{@"width":@4097},@{@"unexpected":@1}]) {
             NSMutableDictionary *bad=[base mutableCopy];[bad addEntriesFromDictionary:change];bool failed=false;try{configuration(bad);}catch(const std::runtime_error&){failed=true;}require(failed,"Invalid comparison config was accepted");
         }
         [base addEntriesFromDictionary:@{@"layouts":@[@{@"width":@2880,@"height":@1800,@"screen":@0},@{@"width":@1920,@"height":@1080,@"screen":@1}],@"playback":@"loop",@"collectMetrics":@YES}];
