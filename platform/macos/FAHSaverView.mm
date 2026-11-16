@@ -66,6 +66,8 @@ static void cacheError(const std::string& message) {
     std::unique_ptr<fah::SnapshotCache> _cache;
     fah::LiveModel _model;
     NSString *_connectionStatus, *_configurationError;
+    BOOL _resumeWhenPresented, _detachedFromSuperview;
+    CGSize _lastDrawableSize;
     NSUInteger _sourceGeneration, _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_playback, *_style, *_background;
@@ -98,14 +100,6 @@ static void cacheError(const std::string& message) {
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
     _renderer = [[FAHRenderer alloc] initWithDevice:MTLCreateSystemDefaultDevice() error:&error];
-    _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_renderer.device];
-    _metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _metalView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
-    _metalView.framebufferOnly = YES;
-    _metalView.paused = YES;
-    _metalView.enableSetNeedsDisplay = NO;
-    _metalView.delegate = _renderer;
-    [self addSubview:_metalView];
     _status = [NSTextField wrappingLabelWithString:error.localizedDescription ?: @"Connecting to Folding@home…"];
     _status.textColor = NSColor.whiteColor;
     _status.drawsBackground = YES;
@@ -184,13 +178,15 @@ static void cacheError(const std::string& message) {
 }
 - (NSDictionary *)renderMetrics {
     NSMutableDictionary *result = [[_renderer metrics] mutableCopy];
-    result[@"drawable_width"] = @(_metalView.drawableSize.width);
-    result[@"drawable_height"] = @(_metalView.drawableSize.height);
+    const CGSize size = _metalView ? _metalView.drawableSize : _lastDrawableSize;
+    result[@"drawable_width"] = @(size.width);
+    result[@"drawable_height"] = @(size.height);
     result[@"drawing_mode"] = @"ScreenSaverView animateOneFrame";
     result[@"animation_callbacks"] = @(_animationCallbackCount-_measurementCallbackBaseline);
     result[@"model_available"] = @(_model.available());
     result[@"using_cached_model"] = @(_model.usingFallback());
     result[@"connection_message_visible"] = @(!_status.hidden);
+    result[@"cache_worker_active"] = @(_cache != nullptr);
     return result;
 }
 
@@ -220,8 +216,15 @@ static void cacheError(const std::string& message) {
 }
 
 - (void)startAnimation {
+    if (self.isAnimating) return;
+    if (self.isHiddenOrHasHiddenAncestor || _detachedFromSuperview) {
+        _resumeWhenPresented = YES;
+        return;
+    }
+    _resumeWhenPresented = NO;
+    if (!_renderer) { [self updateStatus]; return; }
+    [self preparePresentationView];
     [super startAnimation];
-    if (!_renderer) return;
     ++_sourceGeneration;
     if (_source) { _source->stop(); _source.reset(); }
     fah::SourceEvent reset;
@@ -258,8 +261,21 @@ static void cacheError(const std::string& message) {
     [self updateStatus];
 }
 
-- (void)stopAnimation {
+- (void)preparePresentationView {
+    if (_metalView) return;
+    _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_renderer.device];
+    _metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _metalView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    _metalView.framebufferOnly = YES;
+    _metalView.paused = YES;
+    _metalView.enableSetNeedsDisplay = NO;
+    _metalView.delegate = _renderer;
+    [self addSubview:_metalView positioned:NSWindowBelow relativeTo:_status];
+}
+
+- (void)stopAnimationResources {
     ++_sourceGeneration;
+    [super stopAnimation];
     if (_source) { _source->stop(); _source.reset(); }
     fah::SourceEvent reset;
     reset.kind = fah::SourceEvent::Kind::Reset;
@@ -267,10 +283,59 @@ static void cacheError(const std::string& message) {
     if (_cache) {
         try { _cache->flush(); }
         catch (const std::exception& exception) { cacheError(exception.what()); }
+        _cache.reset();
     }
     [_renderer stop];
     [_renderer setCapture:nullptr];
-    [super stopAnimation];
+    if (_metalView) {
+        _lastDrawableSize = _metalView.drawableSize;
+        _metalView.delegate = nil;
+        [_metalView releaseDrawables];
+        [_metalView removeFromSuperview];
+        _metalView = nil;
+    }
+}
+
+- (void)stopAnimation {
+    _resumeWhenPresented = NO;
+    [self stopAnimationResources];
+}
+
+- (void)suspendAnimationForPresentation:(BOOL)resume {
+    [self stopAnimationResources];
+    _resumeWhenPresented = resume;
+}
+
+- (void)resumeAnimationForPresentation {
+    if (_resumeWhenPresented && !_detachedFromSuperview && !self.isHiddenOrHasHiddenAncestor)
+        [self startAnimation];
+}
+
+- (void)viewDidHide {
+    const BOOL resume = self.isAnimating || _resumeWhenPresented;
+    [super viewDidHide];
+    [self suspendAnimationForPresentation:resume];
+}
+
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    [self resumeAnimationForPresentation];
+}
+
+- (void)viewWillMoveToSuperview:(NSView *)newSuperview {
+    const BOOL detached = self.superview != nil && newSuperview == nil;
+    const BOOL resume = self.isAnimating || _resumeWhenPresented;
+    if (detached) _detachedFromSuperview = YES;
+    [super viewWillMoveToSuperview:newSuperview];
+    if (detached) [self suspendAnimationForPresentation:resume];
+}
+
+- (void)viewDidMoveToSuperview {
+    [super viewDidMoveToSuperview];
+    if (self.superview) {
+        _detachedFromSuperview = NO;
+        [self resumeAnimationForPresentation];
+    }
 }
 
 - (void)dealloc {

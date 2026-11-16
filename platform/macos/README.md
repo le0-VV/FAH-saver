@@ -8,6 +8,7 @@ The CMake subdirectory builds these targets:
 - `fah_macos_render_options_tests`: offscreen GPU checks when testing is enabled.
 - `fah_macos_options_lifecycle_tests`: repeated sheet Save/Cancel/close/reopen checks.
 - `fah_macos_cache_lifecycle_tests`: cached startup and live/offline model handover checks.
+- `fah_macos_presentation_lifecycle_tests`: retained-view hide/detach cleanup and resume checks.
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
@@ -88,6 +89,18 @@ Disk writes run on one coalescing cache worker, not on display-frame callbacks.
 Cache failures are logged and do not stop live reception or discard a valid
 in-memory model. Renderer/configuration errors still appear over the view.
 Connecting and retry messages are hidden while a valid model is available.
+
+Actual hiding (including a hidden ancestor) or removal from an existing
+superview suspends the saver even if the host omits `stopAnimation`. Suspension
+stops its timer/source/cache worker, retains only the latest model and releases
+the MTKView/CAMetalLayer presentation owner. Showing or reattaching a previously
+running view recreates that owner once and resumes from the cached model. An
+explicit stop cancels automatic resume. Initial windowless hosting remains
+supported; neither a missing window nor window occlusion is used as a stop test.
+The presentation regression retains the saver across 20 hide/detach/resume
+cycles and checks released weak view/layer references, stopped callbacks and
+deferred hidden starts. These public lifecycle checks do not establish that
+every macOS host retention path emits the required hide/removal events.
 The programmatic options window disables AppKit's automatic release-on-close;
 ARC owns its lifetime. The lifecycle test uses transparent, non-interactive
 windows and an isolated preference domain for ten saves and ten cancels. It
