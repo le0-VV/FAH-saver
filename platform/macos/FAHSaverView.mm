@@ -174,7 +174,7 @@ static void cacheError(const std::string& message) {
 }
 
 - (fah::SourceOptions)sourceOptions {
-    return {self.sourceURL.UTF8String, [[_defaults stringForKey:@"unit"] UTF8String] ?: ""};
+    return {self.sourceURL.UTF8String, [[_defaults stringForKey:@"unit"] UTF8String] ?: "", !_options.loop};
 }
 
 - (void)prepareCache {

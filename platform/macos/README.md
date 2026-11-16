@@ -41,6 +41,10 @@ The user frame-rate limit does not alter snapshot cadence. `--unit ID` selects a
 specific WU for a live source. Without an ID, the source selects the first running
 WU and reports when none is available. The harness waits up to 30 seconds for its
 first usable live snapshot.
+Live latest mode enables the source adapter's latest-only delivery policy:
+published history is validated but not displayed before the reported tail arrives. Loop
+mode still receives the available history. The developer capture tool keeps its
+full-history delivery policy.
 
 Output JSON distinguishes CPU encoding time, GPU command-buffer time and actual
 drawable presentation intervals. Offscreen mode has no presentation timestamps,

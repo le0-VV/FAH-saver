@@ -136,7 +136,7 @@ int main(int argc, const char *argv[]) {
                 ready = !capture->frames.empty();
                 [renderer setCapture:std::move(capture)];
             } else {
-                source = fah::makeSource({sourceURL,unit}, [&](const fah::SourceEvent& event) {
+                source = fah::makeSource({sourceURL,unit,!options.loop}, [&](const fah::SourceEvent& event) {
                     switch (event.kind) {
                         case fah::SourceEvent::Kind::Reset:
                             ready = false; liveCapture = std::make_shared<fah::Capture>();

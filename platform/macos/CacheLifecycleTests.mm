@@ -19,6 +19,7 @@ struct Preferences {
 
 struct Control {
     fah::SourceCallback callback;
+    fah::SourceOptions options;
     std::function<void()> onStart;
     unsigned starts = 0;
     void send(fah::SourceEvent event) { check(bool(callback),"Source has not started"); callback(std::move(event)); }
@@ -35,7 +36,8 @@ public:
 };
 
 static FAHSaverSourceFactory source(std::shared_ptr<Control> control) {
-    return [control](fah::SourceOptions, fah::SourceCallback callback) {
+    return [control](fah::SourceOptions options, fah::SourceCallback callback) {
+        control->options = std::move(options);
         return std::make_unique<ControlledSource>(control,std::move(callback));
     };
 }
@@ -89,6 +91,7 @@ int main(int argc, const char *argv[]) {
             };
             [view startAnimation];
             check(control->starts == 1,"Injected source did not start");
+            check(!control->options.latestOnly,"Loop mode requested latest-only source data");
             control->send(event(fah::SourceEvent::Kind::Status));
             control->send(event(fah::SourceEvent::Kind::Error));
             control->send(event(fah::SourceEvent::Kind::Reset));
@@ -124,9 +127,14 @@ int main(int argc, const char *argv[]) {
                       recording->frames.front().front().x == newest->front().x,"Latest complete model was not persisted");
             }
             control->onStart = {};
+            [preferences.defaults setBool:NO forKey:@"loop"];
             FAHSaverView *restarted = [[principal alloc] initWithFrame:NSMakeRect(0,0,320,240) isPreview:NO
                 preferences:preferences.defaults cachePath:cache.file() sourceFactory:source(control)];
             expectModel(restarted,topology->atoms.size(),1,true);
+            [restarted startAnimation];
+            check(control->options.latestOnly,"Follow latest did not suppress the source's published history");
+            expectModel(restarted,topology->atoms.size(),1,true);
+            [restarted stopAnimation];
             [preferences.defaults setObject:@"another-work-unit" forKey:@"unit"];
             [restarted startAnimation];
             check(![[restarted renderMetrics][@"model_available"] boolValue],"Cache from another source selection was displayed");
