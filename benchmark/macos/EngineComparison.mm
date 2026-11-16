@@ -166,6 +166,7 @@ static ECConfig *readConfiguration(NSString *file) {
 @property(strong) FAHWebRenderer *web;
 @property(strong) NSDictionary *layout, *baseline, *finalMetrics;
 @property double scale, baselineUptime, finalUptime;
+@property NSInteger actualWidth, actualHeight;
 @property unsigned long long baselineDraws, finalDraws;
 @property BOOL ready, started, sizing;
 @end
@@ -269,12 +270,14 @@ static NSNumber *draws(NSDictionary *metrics) {
                         @"({width:document.querySelector('canvas').width,height:document.querySelector('canvas').height})";
                     @autoreleasepool {[canvas.web.webView evaluateJavaScript:sizeScript completionHandler:^(id result,NSError *error){
                         @autoreleasepool { ECHarness *owner=weakSelf;if(!owner)return;protect(owner,^{require(!error&&[result isKindOfClass:NSDictionary.class],"Web canvas dimensions are unavailable");
-                            require([result[@"width"] integerValue]==[canvas.layout[@"width"] integerValue]&&[result[@"height"] integerValue]==[canvas.layout[@"height"] integerValue],"Web canvas dimensions do not match the requested layout");canvas.ready=YES;[owner checkLoading];}); }
+                            canvas.actualWidth=[result[@"width"] integerValue];canvas.actualHeight=[result[@"height"] integerValue];
+                            require(canvas.actualWidth==[canvas.layout[@"width"] integerValue]&&canvas.actualHeight==[canvas.layout[@"height"] integerValue],"Web canvas dimensions do not match the requested layout");canvas.ready=YES;[owner checkLoading];}); }
                     }];}
                 }
                 if(!canvas.ready)all=NO;
             } else {
                 const CGSize size=((MTKView*)canvas.presentation).drawableSize;
+                canvas.actualWidth=static_cast<NSInteger>(size.width);canvas.actualHeight=static_cast<NSInteger>(size.height);
                 require(size.width==[canvas.layout[@"width"] integerValue]&&size.height==[canvas.layout[@"height"] integerValue],"Metal view dimensions do not match the requested layout");
                 canvas.ready=[self->_config->mode isEqual:@"screenshot"]||canvas.driver.submissions>0;
                 if(!canvas.ready)all=NO;
@@ -350,7 +353,7 @@ static NSNumber *draws(NSDictionary *metrics) {
     for(ECCanvas *canvas in _canvases) {
         const double seconds=canvas.finalUptime-canvas.baselineUptime;
         const auto delta=canvas.finalDraws>=canvas.baselineDraws?canvas.finalDraws-canvas.baselineDraws:0;
-        [views addObject:@{@"layout":canvas.layout,@"backing_scale":@(canvas.scale),@"baseline":canvas.baseline?:@{},@"final":canvas.finalMetrics?:@{},
+        [views addObject:@{@"layout":canvas.layout,@"backing_scale":@(canvas.scale),@"actual_width":@(canvas.actualWidth),@"actual_height":@(canvas.actualHeight),@"baseline":canvas.baseline?:@{},@"final":canvas.finalMetrics?:@{},
             @"draw_count":@(delta),@"draw_count_elapsed_seconds":@(std::max(0.0,seconds)),
             @"draw_count_rate":@(seconds>0?delta/seconds:0),
             @"cadence_scope":canvas.metal?@"Successful Metal command-buffer submissions; not display presentations":@"WebGL draw calls; not display presentations"}];
