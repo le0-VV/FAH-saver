@@ -38,7 +38,7 @@ Display frame rate is independent.
 `--fps` accepts integers from 1 to 240. No model is substituted when data is
 unavailable and no saved model exists; the host displays connection or
 configuration status instead.
-Live loop retention fails explicitly at 128 MiB of coordinates or 10,000
+Live loop retention fails explicitly at 128 MiB of coordinates or 100,000
 snapshots. Latest mode retains one snapshot.
 
 When connecting in latest mode, older catch-up snapshots do not replace the
