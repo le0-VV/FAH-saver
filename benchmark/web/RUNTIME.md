@@ -35,8 +35,9 @@ There is no per-frame message stream.
   `measurementDraws` resets at measurement start. Measurement preserves camera
   time and the current model. Disabling `collectMetrics` clears measurement data.
 
-Capture/frame updates preserve the rotation clock. Initial start without a
-model draws its background once and waits for data. Live coordinates are limited
+Capture/frame updates preserve the rotation clock. Initial start draws the cached model synchronously at zero seconds before
+scheduling animation. Without a model, it draws its background once and waits
+for data. Live coordinates are limited
 to 128 MiB and 100,000 snapshots. This is separate from the stricter developer
 capture-file parser defaults. Latest mode does not retain a trajectory history.
 

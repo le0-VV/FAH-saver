@@ -136,7 +136,8 @@
       if (running) return true;
       running = true; generation++; epoch = now(); nextDue = epoch; lastSeconds = 0; notifiedFrame = false;
       if (settings.collectMetrics) beginMeasurement();
-      if (!capture) draw(0);
+      draw(0);
+      if (capture) nextDue = epoch + 1000 / settings.fps;
       schedule(); return true;
     }
     function stop() {

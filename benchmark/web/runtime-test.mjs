@@ -93,6 +93,26 @@ function harness() {
 
 {
   const h = harness(), r = h.runtime;
+  r.setCapture(fixture);
+  assert.equal(r.metrics().draws, 0);
+  r.start();
+  assert.equal(r.metrics().draws, 1, 'A cached model must draw synchronously before the first rAF');
+  assert.equal(h.state.firstFrames, 1, 'The first model frame is ready before animation callbacks');
+  assert.equal(r.metrics().elapsedSeconds, 0);
+  assert.equal(h.queued.size, 1, 'Startup schedules exactly one animation callback');
+  r.start();
+  assert.equal(r.metrics().draws, 1, 'An idempotent start must not redraw or schedule twice');
+  assert.equal(h.queued.size, 1);
+  h.advance(0);
+  assert.equal(r.metrics().draws, 1, 'A same-refresh callback must not duplicate the synchronous startup frame');
+  h.advance(20);
+  assert.equal(r.metrics().elapsedSeconds, .02, 'Animation continues from the startup epoch');
+  assert.equal(h.state.firstFrames, 1, 'The scheduled frame must not repeat first-frame readiness');
+  r.dispose();
+}
+
+{
+  const h = harness(), r = h.runtime;
   r.configure({playback: 'loop'}); r.setCapture(fixture); r.renderAt(.99);
   assert.equal(r.metrics().snapshotIndex, 0);
   r.renderAt(1); assert.equal(r.metrics().snapshotIndex, 1);
