@@ -86,15 +86,23 @@ The original native elapsed interval also included renderer teardown, so its
 The browser reported 60 callbacks/s. Both candidates used the Radeon RX 9060 XT;
 WebView2 used ANGLE/D3D11 and runtime 157.0.4341.46.
 
-The short native run reported unexpectedly high CPU use. It is under diagnosis.
+The short native run reported unexpectedly high CPU use. A diagnostic follow-up
+measured 3.938 process CPU seconds over 5.246 wall seconds, with only 0.109 CPU
+seconds on the GUI/main thread. It recorded 304 pump iterations, 299 timer wakes
+and four input-queue wakes. Those counts give no evidence of a large application
+message-loop spin. A run without metrics still used 4.109 process CPU seconds
+over a 5.434-second whole-process lifetime; its GUI thread used 0.219 CPU seconds.
+The remaining CPU belongs to other process threads. Their identity and stacks
+have not been measured, so a driver cause is not yet established.
+
 The browser's observed process CPU includes startup and can omit unobserved
 processes; it is not directly comparable to native post-initialisation CPU.
 Browser working-set sums can double-count shared pages. Power and complete
 browser process cost are unmeasured. No stack winner is established by this pair.
 
 The normal native path now disables benchmark timestamp queries and counters.
-Opt-in aggregate diagnostics separate application-thread CPU, driver-worker
-effects and wait/record/present phases without per-frame logging.
+Opt-in aggregate diagnostics record application-thread CPU and wait/record/present
+phases without per-frame logging. They do not identify the other worker threads.
 
 ## Remaining acceptance work
 
@@ -102,3 +110,8 @@ Resolve Windows CPU cost, then use the [comparison protocol](performance-plan.md
 for sustained, repeated measurements. Full system screensaver installation,
 lock/sleep recovery, mixed-display behaviour, signed release distribution,
 off-site operation and paired FAH-throughput impact remain unverified.
+
+PC access and testing are on hold at the user's request so they can game. The
+completed cleanup audit found no test processes or temporary tasks remaining.
+The root agent closed its temporary LAN and Tailscale SSH tunnels. Further
+runtime checks require the user to release the PC; local source work can proceed.
