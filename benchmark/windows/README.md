@@ -49,6 +49,16 @@ crashpad, short-lived processes can escape observation, and summed working sets
 can count shared pages more than once. Failed process queries are explicit.
 GPU memory, presentation timestamps and power are not measured by this host.
 
+`cpu_sample_series` uses that same sampler to record elapsed host time, host CPU
+since host start, cumulative observed browser CPU since process creation, and
+the retained process count. Entries include inventory availability/liveness and
+the existing sticky query-failure/limit flag. The series retains at most 8192
+entries and reports `cpu_sample_series_dropped`. Initial and final samples can
+fall between timer ticks. Retained counts include exited processes. Newly
+observed processes bring earlier CPU into the cumulative sum, so compare deltas
+with stable process counts after startup and preserve the coverage limitations.
+`tests/check_cpu_series.py` checks the series contract and counter consistency.
+
 ## Build and SDK provenance
 
 The root build can add this directory after `fah_core`. Set `FAH_WEBVIEW2_SDK`

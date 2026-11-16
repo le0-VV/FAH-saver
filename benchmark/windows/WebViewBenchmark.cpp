@@ -20,6 +20,7 @@
 #include <memory>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace {
 using Json = nlohmann::json;
@@ -109,6 +110,12 @@ struct Process {
     SIZE_T peakWorkingSet = 0,peakPrivateCommit = 0;
     ~Process() { if (handle) CloseHandle(handle); }
 };
+struct CpuSample {
+    double elapsed,hostCPU,browserCPU;
+    std::size_t observedProcesses;
+    bool inventoryAvailable,inventoryLive,metricsLimited;
+};
+constexpr std::size_t maxCpuSamples = 8192;
 
 struct App : std::enable_shared_from_this<App> {
     Options options;
@@ -129,6 +136,8 @@ struct App : std::enable_shared_from_this<App> {
     double initialCPU = 0;
     Json result;
     std::map<std::pair<DWORD,std::uint64_t>,std::unique_ptr<Process>> processes;
+    std::vector<CpuSample> cpuSamples;
+    std::uint64_t droppedCpuSamples = 0;
     SIZE_T peakWorkingSum = 0,peakPrivateSum = 0;
 
     ~App() { close(); if (browserExit) CloseHandle(browserExit); if (loader) FreeLibrary(loader); }
@@ -174,6 +183,7 @@ struct App : std::enable_shared_from_this<App> {
     void sample() {
         discover();
         SIZE_T working = 0,committed = 0;
+        double browserCPU = 0;
         PROCESS_MEMORY_COUNTERS_EX host{}; host.cb = sizeof(host);
         if (GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&host),sizeof(host))) {
             working += host.WorkingSetSize; committed += host.PrivateUsage;
@@ -181,6 +191,7 @@ struct App : std::enable_shared_from_this<App> {
         for (auto& entry : processes) {
             auto& process = *entry.second;
             try { process.cpuSeconds = cpu(process.handle); } catch (...) { processMetricsLimited = true; }
+            browserCPU += process.cpuSeconds;
             DWORD status = 0;
             if (!GetExitCodeProcess(process.handle,&status) || status != STILL_ACTIVE) continue;
             PROCESS_MEMORY_COUNTERS_EX memory{}; memory.cb = sizeof(memory);
@@ -192,6 +203,11 @@ struct App : std::enable_shared_from_this<App> {
             working += memory.WorkingSetSize; committed += memory.PrivateUsage;
         }
         peakWorkingSum = std::max(peakWorkingSum,working); peakPrivateSum = std::max(peakPrivateSum,committed);
+        if (cpuSamples.size() < maxCpuSamples) {
+            cpuSamples.push_back({std::chrono::duration<double>(Clock::now()-started).count(),
+                cpu(GetCurrentProcess())-initialCPU,browserCPU,processes.size(),
+                inventoryAvailable,bool(inventory),processMetricsLimited});
+        } else ++droppedCpuSamples;
     }
 
     void receive(ICoreWebView2WebMessageReceivedEventArgs* event) {
@@ -358,6 +374,17 @@ struct App : std::enable_shared_from_this<App> {
         result["webview_process_inventory_available"] = inventoryAvailable;
         result["process_metric_access_or_sampling_failures"] = processMetricsLimited;
         result["process_sampling_interval_ms"] = 500;
+        result["cpu_sample_series_limit"] = maxCpuSamples;
+        result["cpu_sample_series_dropped"] = droppedCpuSamples;
+        result["cpu_sample_series"] = Json::array();
+        for (const auto& value : cpuSamples) {
+            result["cpu_sample_series"].push_back({{"elapsed_seconds",value.elapsed},
+                {"host_cpu_seconds_since_start",value.hostCPU},
+                {"observed_browser_cpu_seconds_since_creation",value.inventoryAvailable ? Json(value.browserCPU) : Json(nullptr)},
+                {"observed_browser_process_count",value.observedProcesses},
+                {"inventory_available",value.inventoryAvailable},{"inventory_live",value.inventoryLive},
+                {"process_metric_access_or_sampling_failures",value.metricsLimited}});
+        }
         result["owned_processes"] = Json::array();
         double browserCPU = 0;
         for (const auto& entry : processes) {
