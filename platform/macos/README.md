@@ -7,6 +7,7 @@ The CMake subdirectory builds these targets:
 - `fah_macos_saver_smoke`: a hidden module host for lifecycle smoke checks.
 - `fah_macos_render_options_tests`: offscreen GPU checks when testing is enabled.
 - `fah_macos_options_lifecycle_tests`: repeated sheet Save/Cancel/close/reopen checks.
+- `fah_macos_cache_lifecycle_tests`: cached startup and live/offline model handover checks.
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
@@ -58,14 +59,31 @@ updates. Per-display-frame work updates camera uniforms and submits draw calls.
 
 ## Screensaver options and checks
 
-The native options sheet selects a live source or capture file, optional WU ID,
+The native options sheet selects a live source URL, optional WU ID,
 latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a light
 sky/grid, dark sky/grid or solid-colour background. The loop interval field is
 visible only in loop mode and defaults to 0.5 seconds. `--background sky|dark|solid`
 selects these backgrounds in the preview. The panel's lower-left corner shows
-the version and build of the loaded saver bundle. Options use ScreenSaverDefaults. Starting and stopping
-the saver starts and stops its native source; a source reset clears the model.
-Missing data and connection errors appear as text over the background.
+the version and build of the loaded saver bundle. Options use ScreenSaverDefaults.
+Starting and stopping the saver starts and stops its native source. The retired
+capture-file controls and mode no longer affect the screensaver. Developer
+preview and capture tools still accept recordings for repeatable tests.
+
+The saver automatically keeps the latest complete topology and one snapshot in
+`NSCachesDirectory/org.fahsaver.screensaver/latest-model.cache`. In the legacy
+host this directory is inside its sandbox container. The cache is bound to the
+configured source URL and optional requested WU, without storing those strings.
+It is read before the source starts. Pending topology, reconnects and connection
+failures leave that model visible; the first complete live snapshot replaces it.
+Loop history is retained only for the live session. On loss of the connection,
+the latest received snapshot becomes the stand-in rather than looping stale
+history. If no valid cache exists, the saver shows the normal connection status
+until its first live snapshot arrives.
+
+Disk writes run on one coalescing cache worker, not on display-frame callbacks.
+Cache failures are logged and do not stop live reception or discard a valid
+in-memory model. Renderer/configuration errors still appear over the view.
+Connecting and retry messages are hidden while a valid model is available.
 The programmatic options window disables AppKit's automatic release-on-close;
 ARC owns its lifetime. The lifecycle test uses transparent, non-interactive
 windows and an isolated preference domain for ten saves and ten cancels. It
@@ -82,12 +100,19 @@ The smoke host loads the actual module, checks its principal class, version labe
 and loop-only interval controls, then runs ten start/stop cycles with two independent views of different
 sizes. Stopping one view must leave the other animating. This hidden check does
 not submit display drawables or establish multi-display presentation.
-It uses a volatile `NSArgumentDomain`
-preference override on an explicitly injected NSUserDefaults instance to select
-the capture file. Normal engine construction still uses ScreenSaverDefaults. Persistent settings must compare
+It uses a volatile `NSArgumentDomain` preference override, an injected fixture
+source and a temporary cache. The fixture source does not open a socket. Normal
+engine construction still uses ScreenSaverDefaults and the native live source.
+Persistent settings must compare
 unchanged before and after each check, and no source callbacks may continue after
 stop. It does not install or activate the system saver, lock the computer or test
 ScreenSaverEngine itself.
+
+The cache lifecycle check loads the actual module with an isolated cache and a
+controlled source. It checks model availability before source startup, offline
+retention, pending WU topology, matching-frame handover, latest-only persistence,
+source-selection isolation, corrupt-cache replacement and ignored callbacks
+after stop. It does not activate the system saver or contact a folding host.
 
 For an explicitly authorised brief full-screen check:
 

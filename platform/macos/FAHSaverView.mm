@@ -1,11 +1,24 @@
 #import "FAHSaverView.h"
-#include "fah/Source.hpp"
+#import <os/log.h>
+#include "fah/LiveModel.hpp"
+#include "fah/SnapshotCache.hpp"
 
 #include <memory>
 #include <cmath>
 #include <string>
 
 static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
+
+static std::filesystem::path defaultCachePath() {
+    NSURL *directory = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
+    if (!directory) throw std::runtime_error("Could not locate the model cache directory");
+    return std::filesystem::path(directory.path.fileSystemRepresentation) / "org.fahsaver.screensaver" / "latest-model.cache";
+}
+
+static void cacheError(const std::string& message) {
+    static os_log_t log = os_log_create("org.fahsaver.screensaver", "cache");
+    os_log_error(log, "%{public}s", message.c_str());
+}
 
 @implementation FAHSaverView {
     MTKView *_metalView;
@@ -14,12 +27,16 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     NSUserDefaults *_defaults;
     FAHRenderOptions _options;
     std::unique_ptr<fah::Source> _source;
-    std::shared_ptr<fah::Capture> _liveCapture;
-    NSString *_connectionStatus;
-    NSUInteger _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
+    FAHSaverSourceFactory _sourceFactory;
+    std::filesystem::path _cachePath;
+    std::string _sourceSelector;
+    std::unique_ptr<fah::SnapshotCache> _cache;
+    fah::LiveModel _model;
+    NSString *_connectionStatus, *_configurationError;
+    NSUInteger _sourceGeneration, _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
-    NSPopUpButton *_inputMode, *_playback, *_style, *_background;
-    NSTextField *_sourceURL, *_unit, *_capturePath, *_fps, *_snapshotInterval, *_snapshotIntervalUnit;
+    NSPopUpButton *_playback, *_style, *_background;
+    NSTextField *_sourceURL, *_unit, *_fps, *_snapshotInterval, *_snapshotIntervalUnit;
     NSColorWell *_colour;
 }
 
@@ -28,14 +45,22 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 }
 
 - (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview preferences:(NSUserDefaults *)preferences {
+    return [self initWithFrame:frame isPreview:isPreview preferences:preferences
+        cachePath:defaultCachePath() sourceFactory:fah::makeSource];
+}
+
+- (instancetype)initWithFrame:(NSRect)frame isPreview:(BOOL)isPreview preferences:(NSUserDefaults *)preferences
+                    cachePath:(const std::filesystem::path&)cachePath sourceFactory:(FAHSaverSourceFactory)sourceFactory {
     self = [super initWithFrame:frame isPreview:isPreview];
     if (!self) return nil;
+    if (!sourceFactory) throw std::runtime_error("A FAH source factory is required");
+    _sourceFactory = std::move(sourceFactory);
+    _cachePath = cachePath;
     // Keep the Metal child inside a layer-backed root when macOS composites each display.
     self.wantsLayer = YES;
     _defaults = preferences ? preferences : [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
-    [_defaults registerDefaults:@{ @"inputMode": @0,
-        @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
-        @"capturePath": @"", @"loop": @NO, @"style": @0, @"fps": @60,
+    [_defaults registerDefaults:@{ @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
+        @"loop": @NO, @"style": @0, @"fps": @60,
         @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @.5,
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
@@ -48,7 +73,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _metalView.enableSetNeedsDisplay = NO;
     _metalView.delegate = _renderer;
     [self addSubview:_metalView];
-    _status = [NSTextField wrappingLabelWithString:error.localizedDescription ? error.localizedDescription : @"Connecting to Folding@home…"];
+    _status = [NSTextField wrappingLabelWithString:error.localizedDescription ?: @"Connecting to Folding@home…"];
     _status.textColor = NSColor.whiteColor;
     _status.drawsBackground = YES;
     _status.backgroundColor = [NSColor colorWithWhite:0 alpha:.75];
@@ -59,11 +84,45 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
         [_status.centerXAnchor constraintEqualToAnchor:self.centerXAnchor],
         [_status.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
         [_status.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor multiplier:.85] ]];
+    _connectionStatus = error.localizedDescription ?: @"Connecting to Folding@home…";
+    if (!_renderer) _configurationError = error.localizedDescription ?: @"The Metal renderer could not be created.";
     [self loadOptions];
+    [self prepareCache];
+    [self updateStatus];
     return self;
 }
 
+- (NSString *)sourceURL {
+    NSString *url = [_defaults stringForKey:@"sourceURL"];
+    // Retired file-only settings can have an empty source; use the normal local endpoint.
+    return url.length ? url : @"ws://127.0.0.1:7396/api/websocket";
+}
+
+- (fah::SourceOptions)sourceOptions {
+    return {self.sourceURL.UTF8String, [[_defaults stringForKey:@"unit"] UTF8String] ?: ""};
+}
+
+- (void)prepareCache {
+    const auto options = [self sourceOptions];
+    std::string selector = options.url;
+    selector.push_back('\0'); selector += options.unit;
+    if (selector != _sourceSelector) {
+        _cache.reset();
+        _model.clear();
+        _sourceSelector = selector;
+    }
+    try {
+        if (!_cache) _cache = std::make_unique<fah::SnapshotCache>(_cachePath, selector, cacheError);
+        if (!_model.available())
+            if (auto snapshot = _cache->load()) _model.seed(std::move(snapshot));
+    } catch (const std::exception& exception) {
+        cacheError(exception.what());
+    }
+    [_renderer setCapture:_model.capture()];
+}
+
 - (BOOL)loadOptions {
+    if (!_renderer) return NO;
     _options.fps = static_cast<int>([_defaults integerForKey:@"fps"]);
     _options.loop = [_defaults boolForKey:@"loop"];
     _options.snapshotInterval = [_defaults doubleForKey:@"snapshotInterval"];
@@ -74,13 +133,14 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _options.darkSky = [_defaults boolForKey:@"darkSky"];
     _options.colour = {[_defaults floatForKey:@"red"], [_defaults floatForKey:@"green"], [_defaults floatForKey:@"blue"]};
     try {
-        if (style < 0 || style > 4 || [_defaults integerForKey:@"inputMode"] < 0 || [_defaults integerForKey:@"inputMode"] > 1)
+        if (style < 0 || style > 4)
             throw std::runtime_error("Invalid saved screensaver settings. Open Screen Saver Options to correct them.");
         [_renderer setOptions:_options];
         self.animationTimeInterval = 1.0/_options.fps;
+        _configurationError = nil;
         return YES;
     } catch (const std::exception& exception) {
-        _connectionStatus = [NSString stringWithUTF8String:exception.what()];
+        _configurationError = [NSString stringWithUTF8String:exception.what()];
         return NO;
     }
 }
@@ -95,6 +155,9 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     result[@"drawable_height"] = @(_metalView.drawableSize.height);
     result[@"drawing_mode"] = @"ScreenSaverView animateOneFrame";
     result[@"animation_callbacks"] = @(_animationCallbackCount-_measurementCallbackBaseline);
+    result[@"model_available"] = @(_model.available());
+    result[@"using_cached_model"] = @(_model.usingFallback());
+    result[@"connection_message_visible"] = @(!_status.hidden);
     return result;
 }
 
@@ -102,69 +165,55 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 - (NSUInteger)sourceCallbackCount { return _sourceCallbackCount; }
 - (NSUInteger)animationCallbackCount { return _animationCallbackCount; }
 
-- (void)setCapture:(std::shared_ptr<const fah::Capture>)capture {
-    [_renderer setCapture:std::move(capture)];
-    [self updateStatus];
-}
-
 - (void)updateStatus {
-    NSString *text = _connectionStatus ? _connectionStatus : _renderer.lastError;
-    NSString *display = text ? text : @"";
+    NSString *text = _configurationError ?: (_renderer && _model.available() ? _renderer.lastError : (_connectionStatus ?: _renderer.lastError));
+    NSString *display = text ?: @"";
     if (![_status.stringValue isEqualToString:display]) _status.stringValue = display;
     _status.hidden = !text.length;
+}
+
+- (void)receiveSourceEvent:(const fah::SourceEvent&)event {
+    const auto previous = _model.revision();
+    const bool fresh = _model.receive(event, _options.loop);
+    if (_model.revision() != previous) [_renderer setCapture:_model.capture()];
+    if (event.kind == fah::SourceEvent::Kind::Status || event.kind == fah::SourceEvent::Kind::Error)
+        _connectionStatus = [NSString stringWithUTF8String:event.text.c_str()];
+    else if (fresh) _connectionStatus = nil;
+    if (fresh && _cache) {
+        try { _cache->queue(_model.latestTopology(), _model.latestFrame()); }
+        catch (const std::exception& exception) { cacheError(exception.what()); }
+    }
+    [self updateStatus];
 }
 
 - (void)startAnimation {
     [super startAnimation];
     if (!_renderer) return;
+    ++_sourceGeneration;
     if (_source) { _source->stop(); _source.reset(); }
-    _connectionStatus = nil;
+    fah::SourceEvent reset;
+    reset.kind = fah::SourceEvent::Kind::Reset;
+    _model.receive(reset, _options.loop);
+    _connectionStatus = @"Connecting to Folding@home…";
     if (![self loadOptions]) { [self updateStatus]; return; }
-    [_renderer setCapture:nullptr];
+    [self prepareCache];
     [_renderer start];
     try {
-        if ([_defaults integerForKey:@"inputMode"] == 1) {
-            NSString *path = [_defaults stringForKey:@"capturePath"];
-            if (!path.length) throw std::runtime_error("Choose a protein capture file in Screen Saver Options.");
-            [self setCapture:std::make_shared<const fah::Capture>(fah::readCapture(path.fileSystemRepresentation))];
-        } else {
-            __weak FAHSaverView *weakSelf = self;
-            fah::SourceOptions sourceOptions{[[_defaults stringForKey:@"sourceURL"] UTF8String],
-                [[_defaults stringForKey:@"unit"] UTF8String]};
-            _source = fah::makeSource(sourceOptions, [weakSelf](const fah::SourceEvent& event) {
-                FAHSaverView *view = weakSelf;
-                if (!view) return;
-                ++view->_sourceCallbackCount;
-                switch (event.kind) {
-                    case fah::SourceEvent::Kind::Reset:
-                        view->_liveCapture = std::make_shared<fah::Capture>();
-                        [view setCapture:view->_liveCapture];
-                        break;
-                    case fah::SourceEvent::Kind::Topology:
-                        view->_liveCapture = std::make_shared<fah::Capture>();
-                        view->_liveCapture->topology = *event.topology;
-                        [view setCapture:view->_liveCapture];
-                        break;
-                    case fah::SourceEvent::Kind::Frame:
-                        if (!view->_liveCapture || !event.frame) break;
-                        if (!view->_options.loop) view->_liveCapture->frames.clear();
-                        view->_liveCapture->frames.push_back(*event.frame);
-                        view->_connectionStatus = nil;
-                        [view setCapture:view->_liveCapture];
-                        break;
-                    case fah::SourceEvent::Kind::Status:
-                    case fah::SourceEvent::Kind::Error:
-                        view->_connectionStatus = [NSString stringWithUTF8String:event.text.c_str()];
-                        [view updateStatus];
-                        break;
-                }
-            });
-            _connectionStatus = @"Connecting to Folding@home…";
-            _source->start();
-        }
+        __weak FAHSaverView *weakSelf = self;
+        const NSUInteger generation = _sourceGeneration;
+        _source = _sourceFactory([self sourceOptions], [weakSelf,generation](fah::SourceEvent event) {
+            FAHSaverView *view = weakSelf;
+            if (!view || generation != view->_sourceGeneration || !view.isAnimating) return;
+            ++view->_sourceCallbackCount;
+            [view receiveSourceEvent:event];
+        });
+        if (!_source) throw std::runtime_error("FAH source factory returned no source");
+        _source->start();
     } catch (const std::exception& exception) {
-        _connectionStatus = [NSString stringWithUTF8String:exception.what()];
-        [_renderer setCapture:nullptr];
+        fah::SourceEvent failure;
+        failure.kind = fah::SourceEvent::Kind::Error;
+        failure.text = exception.what();
+        [self receiveSourceEvent:failure];
     }
     [self updateStatus];
 }
@@ -177,19 +226,30 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 }
 
 - (void)stopAnimation {
+    ++_sourceGeneration;
     if (_source) { _source->stop(); _source.reset(); }
+    fah::SourceEvent reset;
+    reset.kind = fah::SourceEvent::Kind::Reset;
+    _model.receive(reset, _options.loop);
+    if (_cache) {
+        try { _cache->flush(); }
+        catch (const std::exception& exception) { cacheError(exception.what()); }
+    }
     [_renderer stop];
     [_renderer setCapture:nullptr];
-    _liveCapture.reset();
     [super stopAnimation];
 }
 
-- (void)dealloc { if (_source) _source->stop(); [_renderer stop]; }
+- (void)dealloc {
+    ++_sourceGeneration;
+    if (_source) _source->stop();
+    [_renderer stop];
+}
 - (BOOL)hasConfigureSheet { return YES; }
 
 - (NSWindow *)configureSheet {
     if (_sheet) return _sheet;
-    _sheet = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,580,400)
+    _sheet = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,580,330)
         styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
     _sheet.releasedWhenClosed = NO;
     _sheet.title = @"FAH Saver Options";
@@ -206,18 +266,10 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
         NSPopUpButton *button = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(170,y,240,26) pullsDown:NO];
         [button addItemsWithTitles:items]; [content addSubview:button]; return button;
     };
-    label(@"Protein source",350);
-    _inputMode = popup(@[@"Live Folding@home client", @"Capture file"],350);
-    [_inputMode selectItemAtIndex:[_defaults integerForKey:@"inputMode"]];
-    label(@"Source URL",315); _sourceURL = text([_defaults stringForKey:@"sourceURL"],315);
+    label(@"Source URL",280); _sourceURL = text([self sourceURL],280);
     _sourceURL.accessibilityLabel = @"Folding@home source URL";
-    label(@"WU ID (optional)",280); _unit = text([_defaults stringForKey:@"unit"],280);
+    label(@"WU ID (optional)",245); _unit = text([_defaults stringForKey:@"unit"],245);
     _unit.accessibilityLabel = @"Optional work unit ID";
-    label(@"Capture file",245); _capturePath = text([_defaults stringForKey:@"capturePath"],245);
-    _capturePath.accessibilityLabel = @"Protein capture file path";
-    _capturePath.frame = NSMakeRect(170,245,300,24);
-    NSButton *browse = [NSButton buttonWithTitle:@"Browse…" target:self action:@selector(browseCapture:)];
-    browse.frame = NSMakeRect(475,244,80,26); [content addSubview:browse];
     label(@"Snapshots",210); _playback = popup(@[@"Follow latest", @"Loop available frames"],210);
     _playback.frame = NSMakeRect(170,210,200,26);
     [_playback selectItemAtIndex:[_defaults boolForKey:@"loop"] ? 1 : 0];
@@ -241,7 +293,6 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _colour = [[NSColorWell alloc] initWithFrame:NSMakeRect(430,105,65,26)];
     _colour.color = [NSColor colorWithSRGBRed:[_defaults floatForKey:@"red"]
         green:[_defaults floatForKey:@"green"] blue:[_defaults floatForKey:@"blue"] alpha:1];
-    _inputMode.accessibilityLabel = @"Protein source type";
     _playback.accessibilityLabel = @"Snapshot playback";
     _style.accessibilityLabel = @"Model style";
     _background.accessibilityLabel = @"Background";
@@ -271,12 +322,6 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _snapshotIntervalUnit.hidden = !loop;
 }
 
-- (void)browseCapture:(id)sender {
-    NSOpenPanel *panel = [NSOpenPanel openPanel];
-    panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
-    if ([panel runModal] == NSModalResponseOK) _capturePath.stringValue = panel.URL.path;
-}
-
 - (void)saveOptions:(id)sender {
     NSScanner *scanner = [NSScanner scannerWithString:_fps.stringValue];
     NSInteger fps;
@@ -290,21 +335,14 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
             !std::isfinite(interval) || interval < .05 || interval > 60)
             problem = @"Enter a snapshot interval from 0.05 to 60 seconds.";
     }
-    if (!problem && _inputMode.indexOfSelectedItem == 0) {
+    if (!problem) {
         NSURL *url = [NSURL URLWithString:_sourceURL.stringValue];
         if (!url.host.length || !([url.scheme isEqualToString:@"ws"] || [url.scheme isEqualToString:@"wss"]))
             problem = @"Enter a WebSocket source URL beginning with ws:// or wss://.";
     }
-    if (!problem && _inputMode.indexOfSelectedItem == 1) {
-        BOOL isDirectory = NO;
-        if (![[NSFileManager defaultManager] fileExistsAtPath:_capturePath.stringValue isDirectory:&isDirectory] || isDirectory)
-            problem = @"Choose an existing protein capture file.";
-    }
     if (problem) { NSAlert *alert = [NSAlert new]; alert.messageText = problem; [alert runModal]; return; }
-    [_defaults setInteger:_inputMode.indexOfSelectedItem forKey:@"inputMode"];
     [_defaults setObject:_sourceURL.stringValue forKey:@"sourceURL"];
     [_defaults setObject:_unit.stringValue forKey:@"unit"];
-    [_defaults setObject:_capturePath.stringValue forKey:@"capturePath"];
     [_defaults setBool:_playback.indexOfSelectedItem == 1 forKey:@"loop"];
     [_defaults setDouble:interval forKey:@"snapshotInterval"];
     [_defaults setInteger:_style.indexOfSelectedItem forKey:@"style"];

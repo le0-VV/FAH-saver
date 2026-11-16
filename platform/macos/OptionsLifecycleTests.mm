@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <ScreenSaver/ScreenSaver.h>
 #import "FAHSaverView.h"
+#include "TestSource.hpp"
 
 #include <cstdio>
 #include <stdexcept>
@@ -34,11 +35,13 @@ int main(int argc, const char *argv[]) {
             Class principal = bundle.principalClass;
             check(principal && [principal isSubclassOfClass:ScreenSaverView.class],"Invalid saver class");
             TestPreferences preferences;
+            // Old file-only preferences must no longer affect the user flow.
             [preferences.defaults setInteger:1 forKey:@"inputMode"];
-            [preferences.defaults setObject:[[NSString stringWithUTF8String:argv[2]] stringByStandardizingPath]
-                                    forKey:@"capturePath"];
+            [preferences.defaults setObject:@"unused-retired-capture.json" forKey:@"capturePath"];
+            TemporaryModelCache cache;
+            auto factory = fixtureSource(std::make_shared<const fah::Capture>(fah::readCapture(argv[2])));
             FAHSaverView *view = [[principal alloc] initWithFrame:NSMakeRect(0,0,320,240)
-                isPreview:YES preferences:preferences.defaults];
+                isPreview:YES preferences:preferences.defaults cachePath:cache.file() sourceFactory:factory];
             NSWindow *parent = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,640,480)
                 styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
             parent.releasedWhenClosed = NO;
@@ -57,6 +60,8 @@ int main(int argc, const char *argv[]) {
                     NSPopUpButton *playback = (NSPopUpButton *)namedControl(sheet.contentView,@"Snapshot playback");
                     NSTextField *interval = (NSTextField *)namedControl(sheet.contentView,@"Seconds between snapshots");
                     check(background && playback && interval,"Options controls were lost on reopen");
+                    check(!namedControl(sheet.contentView,@"Protein capture file path") &&
+                          !namedControl(sheet.contentView,@"Protein source type"),"Capture-file controls remain in Options");
                     [playback selectItemAtIndex:1];
                     [NSApp sendAction:playback.action to:playback.target from:playback];
                     const double seconds = .5 + .25*cycle;

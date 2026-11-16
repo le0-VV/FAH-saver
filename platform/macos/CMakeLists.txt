@@ -27,6 +27,13 @@ target_compile_options(fah_macos_saver_smoke PRIVATE -fobjc-arc)
 target_link_libraries(fah_macos_saver_smoke PRIVATE fah_core "-framework AppKit" "-framework MetalKit" "-framework QuartzCore" "-framework ScreenSaver")
 
 if(BUILD_TESTING)
+    add_executable(fah_macos_cache_lifecycle_tests CacheLifecycleTests.mm)
+    target_compile_options(fah_macos_cache_lifecycle_tests PRIVATE -fobjc-arc)
+    target_link_libraries(fah_macos_cache_lifecycle_tests PRIVATE fah_core
+        "-framework AppKit" "-framework ScreenSaver" "-framework MetalKit")
+    add_test(NAME mac_cache_lifecycle COMMAND fah_macos_cache_lifecycle_tests
+        "$<TARGET_BUNDLE_DIR:FAHSaver>" "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic-small.json")
+    set_tests_properties(mac_cache_lifecycle PROPERTIES TIMEOUT 20)
     add_executable(fah_macos_options_lifecycle_tests OptionsLifecycleTests.mm)
     target_compile_options(fah_macos_options_lifecycle_tests PRIVATE -fobjc-arc)
     target_link_libraries(fah_macos_options_lifecycle_tests PRIVATE fah_core

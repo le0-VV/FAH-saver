@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <ScreenSaver/ScreenSaver.h>
 #import "FAHSaverView.h"
+#include "TestSource.hpp"
 
 #include <cstdio>
 #include <stdexcept>
@@ -36,11 +37,9 @@ static NSString * const ModuleName = @"org.fahsaver.screensaver";
 struct VolatilePreferences {
     __strong NSUserDefaults *defaults;
     __strong NSDictionary *previous;
-    VolatilePreferences(NSUserDefaults *value, NSString *path) : defaults(value) {
+    VolatilePreferences(NSUserDefaults *value) : defaults(value) {
         previous = [defaults volatileDomainForName:NSArgumentDomain];
         NSMutableDictionary *arguments = previous ? [previous mutableCopy] : [NSMutableDictionary new];
-        arguments[@"inputMode"] = @1;
-        arguments[@"capturePath"] = path;
         arguments[@"fps"] = @60;
         arguments[@"style"] = @1;
         arguments[@"loop"] = @NO;
@@ -94,7 +93,7 @@ int main(int argc, const char *argv[]) {
             if (!fullscreen && (testInput || screenshot))
                 throw std::runtime_error("--test-input and --screenshot require --fullscreen");
             NSString *capturePath = [[NSString stringWithUTF8String:argv[2]] stringByStandardizingPath];
-            fah::readCapture(capturePath.fileSystemRepresentation);
+            auto capture = std::make_shared<const fah::Capture>(fah::readCapture(capturePath.fileSystemRepresentation));
             [NSApplication sharedApplication];
             [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
             NSString *path = [[NSString stringWithUTF8String:argv[1]] stringByStandardizingPath];
@@ -109,9 +108,11 @@ int main(int argc, const char *argv[]) {
             const NSRect frame = fullscreen ? screen.frame : NSMakeRect(0,0,320,240);
             NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:ModuleName];
             NSDictionary *persistentBefore = [defaults persistentDomainForName:ModuleName];
-            VolatilePreferences preferences(defaults,capturePath);
+            VolatilePreferences preferences(defaults);
+            TemporaryModelCache cache;
+            auto factory = fixtureSource(capture);
             FAHSaverView *view = [[principal alloc] initWithFrame:NSMakeRect(0,0,frame.size.width,frame.size.height)
-                isPreview:!fullscreen preferences:defaults];
+                isPreview:!fullscreen preferences:defaults cachePath:cache.file() sourceFactory:factory];
             if (!view || !view.hasConfigureSheet || !view.configureSheet)
                 throw std::runtime_error("Saver view or configuration sheet could not be created");
             NSView *controls = view.configureSheet.contentView;
@@ -134,8 +135,8 @@ int main(int argc, const char *argv[]) {
             NSPopUpButton *background = (NSPopUpButton *)namedControl(controls,@"Background");
             if (!background || background.numberOfItems != 3)
                 throw std::runtime_error("Background presets are missing from the options");
-            if ([defaults integerForKey:@"inputMode"] != 1)
-                throw std::runtime_error("Volatile capture preferences were not applied");
+            if (namedControl(controls,@"Protein capture file path") || namedControl(controls,@"Protein source type"))
+                throw std::runtime_error("Retired capture-file controls remain in Options");
             NSString *exitReason = @"ten_start_stop_cycles";
             NSString *screenshotError = nil;
             double elapsed = 0, measuredSeconds = 0;
@@ -143,13 +144,13 @@ int main(int argc, const char *argv[]) {
             NSDictionary *modelMetadata = nil;
             if (!fullscreen) {
                 FAHSaverView *secondView = [[principal alloc] initWithFrame:NSMakeRect(-240,0,240,320)
-                    isPreview:NO preferences:defaults];
+                    isPreview:NO preferences:defaults cachePath:cache.file("second-model.cache") sourceFactory:factory];
                 if (!secondView) throw std::runtime_error("Second saver view could not be created");
                 for (int cycle=0; cycle<10; ++cycle) {
                     [view startAnimation];
                     [secondView startAnimation];
-                    if (view.hasActiveSource || secondView.hasActiveSource)
-                        throw std::runtime_error("Capture test unexpectedly started a network source");
+                    if (!view.hasActiveSource || !secondView.hasActiveSource)
+                        throw std::runtime_error("Fixture source did not start");
                     for (int index=0; index<3; ++index) {
                         [view animateOneFrame];
                         [secondView animateOneFrame];
@@ -202,7 +203,7 @@ int main(int argc, const char *argv[]) {
                 id observer = [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidResignActiveNotification
                     object:NSApp queue:nil usingBlock:^(NSNotification * __unused note) { finish(@"application_deactivated"); }];
                 [view startAnimation];
-                if (view.hasActiveSource) throw std::runtime_error("Capture test unexpectedly started a network source");
+                if (!view.hasActiveSource) throw std::runtime_error("Fixture source did not start");
                 // ScreenSaverView.startAnimation already owns the drawing timer.
                 warmupTimer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer * __unused timer) {
                     [view beginMeasurement];
