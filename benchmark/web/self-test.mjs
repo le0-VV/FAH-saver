@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import './capture.js';
 import './scene.js';
+import './gpu-timer-test.mjs';
 
 const {parseCapture, validateCapture, readCaptureURL, limits} = globalThis.FAHCapture;
 const {makeScene, sphereMesh, cylinderMesh, viewProjection, styleAt, nextFrameDeadline} = globalThis.FAHScene;

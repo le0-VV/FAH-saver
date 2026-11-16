@@ -2,6 +2,7 @@
   'use strict';
   const {limits, parseCapture, validateCapture, readCaptureURL} = globalThis.FAHCapture;
   const {sphereMesh, cylinderMesh, makeScene, viewProjection, styleAt, nextFrameDeadline} = globalThis.FAHScene;
+  const {createGpuTimer} = globalThis.FAHGpuTimer;
   const canvas = document.getElementById('canvas');
   const status = document.getElementById('status');
   const resultElement = document.getElementById('result');
@@ -126,6 +127,7 @@
     gl.frontFace(gl.CCW); gl.cullFace(gl.BACK);
     canvas.addEventListener('webglcontextlost', event => {
       event.preventDefault(); cancelAnimationFrame(animation); animation = 0;
+      metrics?.gpuTimer.contextLost();
       reportError(new Error('WebGL context was lost. Reload before another trial.'));
     });
   }
@@ -151,7 +153,7 @@
     gl.viewport(0, 0, canvas.width, canvas.height);
   }
 
-  function draw(now) {
+  function draw(now, gpuTimer) {
     resize();
     const seconds = (now - epoch) / 1000;
     const frame = settings.playback === 'latest' ? capture.frames.length - 1 : Math.floor(seconds * 10) % capture.frames.length;
@@ -161,17 +163,22 @@
       setInstances(atomMesh, scene.atoms); setInstances(bondMesh, scene.bonds);
       previousFrame = frame; previousStyle = style;
     }
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.useProgram(backgroundProgram); gl.bindVertexArray(null);
-    gl.uniform1i(backgroundUniform.sky, settings.background === 'sky'); gl.uniform3fv(backgroundUniform.solid, settings.colour);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.useProgram(proteinProgram);
     const angle = seconds / 5, c = Math.cos(angle), s = Math.sin(angle);
-    gl.uniformMatrix4fv(uniform.vp, false, viewProjection(angle, canvas.width / canvas.height, scene.radius));
-    gl.uniformMatrix3fv(uniform.rotation, false, new Float32Array([c, 0, -s, 0, 1, 0, s, 0, c]));
-    for (const mesh of [atomMesh, bondMesh]) if (mesh.count) {
-      gl.bindVertexArray(mesh.vao); gl.drawElementsInstanced(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0, mesh.count);
-    }
+    const camera = viewProjection(angle, canvas.width / canvas.height, scene.radius);
+    const rotation = new Float32Array([c, 0, -s, 0, 1, 0, s, 0, c]);
+    const timed = gpuTimer?.begin();
+    try {
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.useProgram(backgroundProgram); gl.bindVertexArray(null);
+      gl.uniform1i(backgroundUniform.sky, settings.background === 'sky'); gl.uniform3fv(backgroundUniform.solid, settings.colour);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); gl.useProgram(proteinProgram);
+      gl.uniformMatrix4fv(uniform.vp, false, camera);
+      gl.uniformMatrix3fv(uniform.rotation, false, rotation);
+      for (const mesh of [atomMesh, bondMesh]) if (mesh.count) {
+        gl.bindVertexArray(mesh.vao); gl.drawElementsInstanced(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_INT, 0, mesh.count);
+      }
+    } finally { if (timed) gpuTimer.end(); }
     if (metrics && now - metrics.lastStatus > 1000) {
       status.textContent = `Running: ${Math.max(0, (now - metrics.start) / 1000).toFixed(1)} / ${settings.seconds} s; ${capture.atoms.length} atoms`;
       metrics.lastStatus = now;
@@ -189,6 +196,7 @@
     const sample = metrics; metrics = null;
     if (params.get('benchmark') === '1') { cancelAnimationFrame(animation); animation = 0; }
     const elapsed = Math.max(0, sample.lastDraw - sample.start);
+    const gpu = sample.gpuTimer.finish();
     const debug = gl.getExtension('WEBGL_debug_renderer_info');
     const result = {
       status: state, error, renderer: 'WebGL2', timingKind: 'requestAnimationFrame callback and CPU submission; not presentation timestamps',
@@ -200,8 +208,13 @@
       drawCallbackIntervalsMs: {median: percentile(sample.drawIntervals, .5), p95: percentile(sample.drawIntervals, .95), p99: percentile(sample.drawIntervals, .99)},
       rafCallbackIntervalsMs: {median: percentile(sample.rafIntervals, .5), p95: percentile(sample.rafIntervals, .95), p99: percentile(sample.rafIntervals, .99)},
       cpuSubmitMs: {median: percentile(sample.cpu, .5), p95: percentile(sample.cpu, .95), p99: percentile(sample.cpu, .99)},
-      gpuTimeMs: null, powerWatts: null,
-      limitations: ['GPU time and power are unmeasured.', 'Callback cadence does not verify display presentation or the shipping frame-rate target.']
+      gpuTimeMs: gpu.samplesMs.length ? {mean: gpu.samplesMs.reduce((sum, value) => sum + value, 0) / gpu.samplesMs.length,
+        median: percentile(gpu.samplesMs, .5), p95: percentile(gpu.samplesMs, .95), p99: percentile(gpu.samplesMs, .99)} : null,
+      gpuTiming: gpu.info, powerWatts: null,
+      limitations: ['Power is unmeasured.',
+        ...(gpu.info.status === 'measured' ? [] : [`GPU time is unmeasured: ${gpu.info.reason}`]),
+        'GPU queries exclude uploads and presentation; final unavailable query results are excluded.',
+        'Callback cadence does not verify display presentation or the shipping frame-rate target.']
     };
     window.benchmarkResult = result;
     resultElement.hidden = params.get('benchmark') === '1'; resultElement.textContent = JSON.stringify(result, null, 2);
@@ -217,13 +230,14 @@
     if (!capture || document.hidden) return;
     try {
       if (metrics && now >= metrics.start) {
+        metrics.gpuTimer.poll();
         if (metrics.lastRaf) metrics.rafIntervals.push(now - metrics.lastRaf);
         metrics.lastRaf = now;
       }
       const deadline = nextFrameDeadline(now, nextDue, settings.fps);
       if (deadline === null) return;
       nextDue = deadline;
-      const begin = performance.now(); draw(now); const end = performance.now();
+      const begin = performance.now(); draw(now, metrics && now >= metrics.start ? metrics.gpuTimer : null); const end = performance.now();
       if (metrics && now >= metrics.start) {
         if (metrics.lastDraw) metrics.drawIntervals.push(now - metrics.lastDraw);
         else metrics.start = now;
@@ -236,11 +250,12 @@
   function start() {
     if (!capture) throw new Error('Load a capture before starting a trial');
     if (document.hidden) throw new Error('The benchmark must be visible');
+    if (metrics) finish('cancelled', 'A new trial started');
     readSettings(); resize();
     window.benchmarkResult = null; resultElement.hidden = true;
     epoch = performance.now(); nextDue = epoch; previousFrame = -1; previousStyle = -1;
     metrics = {start: epoch + settings.warmup * 1000, lastDraw: 0, lastRaf: 0, lastStatus: epoch,
-      draws: 0, drawIntervals: [], rafIntervals: [], cpu: []};
+      draws: 0, drawIntervals: [], rafIntervals: [], cpu: [], gpuTimer: createGpuTimer(gl)};
     status.className = ''; status.textContent = settings.warmup ? 'Warming up…' : 'Running…';
     if (!animation) animation = requestAnimationFrame(tick);
   }
@@ -280,6 +295,7 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden && metrics) finish('error', 'Page became hidden during the trial'); });
   window.addEventListener('pagehide', () => {
     cancelAnimationFrame(animation); animation = 0;
+    if (metrics) finish('cancelled', 'Page closed during the trial');
     if (!gl) return;
     for (const mesh of [atomMesh, bondMesh]) if (mesh) {
       for (const buffer of [mesh.vertex, mesh.index, mesh.instances]) gl.deleteBuffer(buffer);
