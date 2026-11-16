@@ -4,9 +4,11 @@ A default FAH v8 client listens only on loopback. A remote screensaver cannot
 reach that listener by entering the folding computer's LAN or Tailscale address.
 The server must listen on the chosen interface and permit the viewing client.
 
-FAHSaver 0.1.1 connects directly to the configured source. Its macOS session
-bypasses system HTTP, HTTPS, SOCKS, PAC and proxy discovery settings. Other apps
-and system proxy settings are unchanged. See [macOS networking](macos-source.md).
+FAHSaver 0.1.2 connects directly to the configured source. Its macOS session uses
+an explicit local PAC policy that always returns `DIRECT`, rather than inheriting
+system proxies. Other apps and system proxy settings are unchanged. The 0.1.1
+enable-flags-only setting was insufficient for remote numeric addresses in the
+tested macOS configuration. See [macOS networking](macos-source.md).
 
 ## FAH server configuration
 

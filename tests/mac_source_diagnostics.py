@@ -1,4 +1,4 @@
-"""Check native macOS WebSocket errors using local rejected upgrades only."""
+"""Check native macOS WebSocket errors and optional authorised direct routes."""
 
 import argparse
 import base64
@@ -11,6 +11,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+from urllib.parse import urlsplit
 
 
 def capture(executable, port, folder):
@@ -151,13 +152,41 @@ def lan_direct_connection(executable, host):
     print("Native LAN WebSocket capture passed with system HTTP/HTTPS/SOCKS proxies enabled and unchanged")
 
 
+def remote_direct_connection(executable, url):
+    parts = urlsplit(url)
+    address = ipaddress.ip_address(parts.hostname)
+    if parts.scheme not in ("ws", "wss") or address.is_loopback or parts.username or parts.password:
+        raise RuntimeError("--remote-source requires an authorised remote numeric-IP WebSocket URL")
+    proxy_before = subprocess.check_output(["scutil", "--proxy"])
+    if not all(re.search(rb"\b" + kind + rb"Enable\s*:\s*1", proxy_before) for kind in (b"HTTP", b"HTTPS", b"SOCKS")):
+        raise RuntimeError("Remote routing regression requires existing system HTTP/HTTPS/SOCKS proxies to be enabled")
+    with tempfile.TemporaryDirectory(prefix="fah-mac-remote-") as folder:
+        output = Path(folder) / "capture.json"
+        result = subprocess.run([executable, "--url", url, "--output", str(output), "--seconds", "10", "--frames", "2"],
+                                capture_output=True, text=True, timeout=13)
+        if result.returncode or not output.is_file():
+            raise RuntimeError(f"Native remote numeric-IP capture failed: {result.stderr.strip()}")
+        capture = json.loads(output.read_text())
+        if set(capture) != {"topology", "frames"} or len(capture["frames"]) != 2:
+            raise RuntimeError("Remote source did not supply two valid visualisation snapshots")
+        atoms = len(capture["topology"]["atoms"])
+        bonds = len(capture["topology"]["bonds"])
+    if subprocess.check_output(["scutil", "--proxy"]) != proxy_before:
+        raise RuntimeError("System proxy settings changed during the test")
+    print(f"Native remote numeric-IP capture passed: {atoms} atoms, {bonds} bonds, 2 frames; system proxies unchanged")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", help="Path to the native fah_capture executable")
     parser.add_argument("--lan-host", help="This Mac's non-loopback LAN address, to test deliberate direct routing")
+    parser.add_argument("--remote-source", action="append", default=[],
+                        help="Explicitly authorised remote numeric-IP FAH URL; receives two snapshots and checks routing under enabled system proxies")
     args = parser.parse_args()
     rejected_upgrade(args.executable, 403)
     rejected_upgrade(args.executable, 503)
     refused_connection(args.executable)
     if args.lan_host:
         lan_direct_connection(args.executable, args.lan_host)
+    for source in args.remote_source:
+        remote_direct_connection(args.executable, source)

@@ -154,12 +154,13 @@ struct MacState : std::enable_shared_from_this<MacState> {
         configuration.timeoutIntervalForResource = 0;
         configuration.HTTPShouldSetCookies = NO;
         configuration.URLCache = nil;
-        // This session connects directly to the configured private LAN/VPN source.
+        // Explicit DIRECT PAC prevents WebSockets inheriting system proxies when enable flags are ignored.
         configuration.connectionProxyDictionary = @{
             (__bridge NSString*)kCFNetworkProxiesHTTPEnable: @NO,
             (__bridge NSString*)kCFNetworkProxiesHTTPSEnable: @NO,
             (__bridge NSString*)kCFNetworkProxiesSOCKSEnable: @NO,
-            (__bridge NSString*)kCFNetworkProxiesProxyAutoConfigEnable: @NO,
+            (__bridge NSString*)kCFNetworkProxiesProxyAutoConfigEnable: @YES,
+            (__bridge NSString*)kCFNetworkProxiesProxyAutoConfigJavaScript: @"function FindProxyForURL(url, host) { return 'DIRECT'; }",
             (__bridge NSString*)kCFNetworkProxiesProxyAutoDiscoveryEnable: @NO
         };
         session = [NSURLSession sessionWithConfiguration:configuration];
