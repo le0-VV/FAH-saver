@@ -66,6 +66,7 @@ void checkSnapshot(const std::shared_ptr<const fah::Capture>& snapshot, float va
 } // namespace
 
 int main() {
+    const char* stage = "initial persistence";
     try {
         TemporaryDirectory temporary;
         const auto file = temporary.path / "nested" / "latest.snapshot";
@@ -81,6 +82,7 @@ int main() {
             // Destruction must finish the pending valid snapshot.
         }
         fah::SnapshotCache cache(file, selector);
+        stage = "restart and source isolation";
         checkSnapshot(cache.load(), 2);
         const auto valid = bytes(file);
         check(valid.find("PRIVATE_SOURCE") == std::string::npos && valid.find("PRIVATE_WU") == std::string::npos,
@@ -94,6 +96,7 @@ int main() {
         check(!stat(file.c_str(), &attributes) && (attributes.st_mode & 0777) == 0600,
               "Snapshot cache permissions are not private");
 #endif
+        stage = "malformed cache rejection";
         for (const auto& corrupt : {std::string("bad header"), valid.substr(0, valid.size() / 2)}) {
             write(file, corrupt);
             rejects([&] { cache.load(); });
@@ -116,6 +119,7 @@ int main() {
         rejects([&] { cache.load(); });
         write(file, valid);
 
+        stage = "invalid write preservation and recovery";
         cache.queue(topology(), frame(std::numeric_limits<float>::quiet_NaN()));
         rejects([&] { cache.flush(); });
         check(bytes(file) == valid, "Invalid data replaced the previous valid snapshot");
@@ -124,6 +128,7 @@ int main() {
         cache.flush();
         checkSnapshot(cache.load(), 3);
         const auto beforeIOFailure = bytes(file);
+        stage = "read-only destination failure";
 #ifdef _WIN32
         check(SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_READONLY), "Could not make the test cache read-only");
 #else
@@ -133,7 +138,9 @@ int main() {
         bool failed = false;
         try { cache.flush(); } catch (const std::runtime_error&) { failed = true; }
 #ifdef _WIN32
-        SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_NORMAL);
+        stage = "restore writable destination";
+        check(SetFileAttributesW(file.c_str(), FILE_ATTRIBUTE_NORMAL),
+              "Could not restore writable test cache attributes");
 #else
         chmod(file.parent_path().c_str(), 0700);
 #endif
@@ -143,6 +150,7 @@ int main() {
         for (const auto& entry : std::filesystem::directory_iterator(file.parent_path()))
             check(entry.path() == file, "Failed write left a temporary file behind");
 
+        stage = "concurrent reader and atomic replacement";
         std::atomic<bool> reading{true};
         std::atomic<unsigned> readCount{0};
         std::exception_ptr readFailure;
@@ -168,6 +176,7 @@ int main() {
         check(readCount > 1, "Concurrent cache reader did not run");
         checkSnapshot(cache.load(), 29);
 
+        stage = "queued latest snapshot coalescing";
         std::mutex mutex;
         std::condition_variable condition;
         bool callbackEntered = false, releaseCallback = false;
@@ -210,7 +219,7 @@ int main() {
         std::cout << "Snapshot cache persistence, isolation, validation, atomic replacement and coalescing passed.\n";
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
+        std::cerr << "Snapshot cache stage '" << stage << "': " << error.what() << '\n';
         return 1;
     }
 }
