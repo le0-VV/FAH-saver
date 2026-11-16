@@ -1,4 +1,5 @@
 #include "../Options.hpp"
+#include "../DecimalEdit.hpp"
 
 #include <cstdlib>
 #include <iostream>
@@ -19,7 +20,7 @@ int main() {
         "--background", "solid", "--colour", "#ff0080"});
     check(options.fps == 60 && options.seconds == 2.5 && options.style == 5);
     check(options.loop && !options.sky && options.colour[0] == 1 && options.colour[1] == 0);
-    check(options.snapshotInterval == .5 && !options.darkSky);
+    check(options.snapshotInterval == 1 && !options.darkSky);
     const auto dark = parseOptions({"--background", "dark", "--snapshot-interval", "0.75"});
     check(dark.sky && dark.darkSky && dark.snapshotInterval == .75);
     const auto light = parseOptions({"--background", "sky"},dark);
@@ -27,17 +28,30 @@ int main() {
     const auto solid = parseOptions({"--background", "solid"},dark);
     check(!solid.sky && !solid.darkSky);
     auto loop = parseOptions({"--playback", "loop"});
-    check(snapshotIndex(0,3,loop) == 0 && snapshotIndex(.499,3,loop) == 0);
-    check(snapshotIndex(.5,3,loop) == 1 && snapshotIndex(1.499,3,loop) == 2);
-    check(snapshotIndex(1.5,3,loop) == 0);
+    check(snapshotIndex(0,3,loop) == 0 && snapshotIndex(.999,3,loop) == 0);
+    check(snapshotIndex(1,3,loop) == 1 && snapshotIndex(2.999,3,loop) == 2);
+    check(snapshotIndex(3,3,loop) == 0);
     loop.fps = 240;
-    check(snapshotIndex(.5,3,loop) == 1);
+    check(snapshotIndex(1,3,loop) == 1);
     loop.loop = false;
-    check(snapshotIndex(0,3,loop) == 2 && snapshotIndex(1.5,3,loop) == 2);
+    check(snapshotIndex(0,3,loop) == 2 && snapshotIndex(3,3,loop) == 2);
     const auto fast = parseOptions({"--playback", "loop", "--snapshot-interval", "0.05"});
     const auto slow = parseOptions({"--playback", "loop", "--snapshot-interval", "60"});
     check(snapshotIndex(.049,3,fast) == 0 && snapshotIndex(.05,3,fast) == 1);
     check(snapshotIndex(59.999,3,slow) == 0 && snapshotIndex(60,3,slow) == 1);
+    for (const auto* interval : {"60.001", "3600", "1e100"})
+        check(parseOptions({"--snapshot-interval",interval}).snapshotInterval == std::stod(interval));
+    const auto explicitInterval = parseOptions({"--snapshot-interval","0.5"});
+    check(parseOptions({},explicitInterval).snapshotInterval == .5 &&
+        liveScreensaverOptions(explicitInterval).snapshotInterval == .5);
+    check(decimalReplacement(L"1.2",1,2,L".") && decimalReplacement(L"1.2",0,3,L".5"));
+    check(decimalReplacement(L"1.2",0,3,L"") && decimalReplacement(L"",0,0,L"."));
+    check(decimalReplacement(L"1.",2,2,L"5") && decimalReplacement(L"1.2",1,3,L"0"));
+    check(!decimalReplacement(L"1.2",3,3,L".") && !decimalReplacement(L"1.2",0,3,L"abc3.4"));
+    check(!decimalReplacement(L"1.2",0,3,L"3.4\n") && !decimalReplacement(L"",0,0,L"1e100"));
+    check(!decimalReplacement(L"1",0,1,L"\uff11") && !decimalReplacement(L"1",2,2,L"2"));
+    const auto largeText = fah::decimalText(1e100);
+    check(decimalReplacement(L"",0,0,std::wstring(largeText.begin(),largeText.end())));
     rejects([&] { snapshotIndex(0,0,loop); });
     check(!options.fullscreen);
     check(parseOptions({"--fullscreen", "true", "--seconds", "3600"}).fullscreen);
@@ -66,7 +80,7 @@ int main() {
     rejects([] { parseOptions({"--seconds", "1e20"}); });
     rejects([] { parseOptions({"--snapshot-interval", "0"}); });
     rejects([] { parseOptions({"--snapshot-interval", "0.0499"}); });
-    rejects([] { parseOptions({"--snapshot-interval", "60.001"}); });
+    rejects([] { parseOptions({"--snapshot-interval", "-1"}); });
     rejects([] { parseOptions({"--snapshot-interval", "nan"}); });
     rejects([] { parseOptions({"--snapshot-interval", "inf"}); });
     rejects([] { parseOptions({"--snapshot-interval", "0.5extra"}); });

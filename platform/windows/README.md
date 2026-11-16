@@ -31,8 +31,9 @@ Or select a live FAH endpoint reachable through the private LAN or Tailscale:
 
 `--unit ID` selects a particular current WU. Fixed styles are `1`, `2` and `3`;
 `cycle` and `random` change style every ten seconds. Loop playback advances
-snapshots every 0.5 seconds by default. Use `--snapshot-interval SECONDS` for a
-finite interval from 0.05 to 60 seconds. Latest mode ignores this cadence.
+snapshots every 1 second by default. Use `--snapshot-interval SECONDS` for a
+finite interval of at least 0.05 seconds, with no imposed upper limit. Existing
+saved intervals remain unchanged. Latest mode ignores this cadence.
 Display frame rate is independent.
 `--fps` accepts integers from 1 to 240. No model is substituted when data is
 unavailable and no saved model exists; the host displays connection or
@@ -58,7 +59,12 @@ Native screensaver entry points:
 
 The options panel shows the executable's build version in its lower-left corner.
 Selecting loop playback exposes the snapshot interval field; changing to latest
-leaves the saved interval intact. Background choices are light sky/grid, dark
+leaves the saved interval intact. The field accepts digits and one decimal point
+only. Invalid typing or paste operations are rejected in full. Empty text and a
+lone decimal point remain possible while editing; Save requires a finite value
+of at least 0.05 seconds. Validation errors appear inline and focus the relevant
+field, rather than opening a warning dialog. Large saved values appear as plain
+decimal text. Background choices are light sky/grid, dark
 sky/grid and a custom solid colour. The corresponding CLI values are `sky`,
 `dark` and `solid`. Existing `sky` and `solid` settings keep their previous
 meaning. The sky/grid presets are native approximations; they do not reproduce

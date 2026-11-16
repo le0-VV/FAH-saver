@@ -10,7 +10,7 @@ set_target_properties(fah_saver_windows PROPERTIES OUTPUT_NAME FAHSaver SUFFIX "
 target_compile_features(fah_saver_windows PRIVATE cxx_std_17)
 target_compile_definitions(fah_saver_windows PRIVATE UNICODE _UNICODE _WIN32_WINNT=0x0a00
     FAH_SAVER_VERSION="${PROJECT_VERSION}")
-target_link_libraries(fah_saver_windows PRIVATE fah_core fah_source Vulkan::Vulkan user32 gdi32 shell32 advapi32 psapi)
+target_link_libraries(fah_saver_windows PRIVATE fah_core fah_source Vulkan::Vulkan user32 gdi32 shell32 advapi32 psapi comctl32)
 if(MSVC)
     target_compile_options(fah_saver_windows PRIVATE /W4 /permissive- /utf-8)
 else()
@@ -39,6 +39,7 @@ add_custom_command(TARGET fah_saver_windows POST_BUILD
 if(BUILD_TESTING)
     add_executable(fah_windows_options_tests tests/OptionsTests.cpp)
     target_compile_features(fah_windows_options_tests PRIVATE cxx_std_17)
+    target_include_directories(fah_windows_options_tests PRIVATE "${PROJECT_SOURCE_DIR}/include")
     add_test(NAME windows_options COMMAND fah_windows_options_tests)
     add_executable(fah_windows_winding_tests tests/WindingTests.cpp)
     target_link_libraries(fah_windows_winding_tests PRIVATE fah_core)

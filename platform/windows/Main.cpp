@@ -1,10 +1,12 @@
 #include "Options.hpp"
+#include "DecimalEdit.hpp"
 #include "Renderer.hpp"
 #include <fah/Source.hpp>
 #include <fah/LiveModel.hpp>
 #include <fah/SnapshotCache.hpp>
 #include <shellapi.h>
 #include <psapi.h>
+#include <commctrl.h>
 
 #include <algorithm>
 #include <atomic>
@@ -15,8 +17,8 @@
 #include <fstream>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <random>
-#include <sstream>
 #include <stdexcept>
 #include <thread>
 
@@ -68,9 +70,6 @@ std::string hexColour(const Options& options) {
     std::snprintf(value,sizeof(value),"%02x%02x%02x",int(options.colour[0]*255+.5f),int(options.colour[1]*255+.5f),int(options.colour[2]*255+.5f));
     return value;
 }
-std::string intervalText(double interval) {
-    std::ostringstream text; text << std::setprecision(15) << interval; return text.str();
-}
 Options preferences() {
     std::vector<std::string> arguments;
     const std::pair<const wchar_t*,const char*> entries[]{
@@ -85,14 +84,55 @@ Options preferences() {
 }
 
 enum Control { sourceControl=100,unitControl,fpsControl,styleControl,playbackControl,
-    backgroundControl,colourControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits };
+    backgroundControl,colourControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits,validationControl };
 struct Configuration { Options options; std::string error; };
-std::string controlText(HWND dialog,int identifier) {
-    HWND control = GetDlgItem(dialog,identifier);
+std::wstring editText(HWND control) {
     const int length = GetWindowTextLengthW(control);
     std::wstring text(std::size_t(length)+1,L'\0');
     GetWindowTextW(control,text.data(),length+1); text.resize(length);
-    return utf8(text);
+    return text;
+}
+std::string controlText(HWND dialog,int identifier) {
+    return utf8(editText(GetDlgItem(dialog,identifier)));
+}
+std::optional<std::wstring> clipboardText(HWND owner) {
+    if (!OpenClipboard(owner)) return std::nullopt;
+    struct Clipboard { ~Clipboard() { CloseClipboard(); } } clipboard;
+    HGLOBAL data = GetClipboardData(CF_UNICODETEXT);
+    if (!data) return std::nullopt;
+    const auto* text = static_cast<const wchar_t*>(GlobalLock(data));
+    if (!text) return std::nullopt;
+    struct Locked { HGLOBAL data; ~Locked() { GlobalUnlock(data); } } locked{data};
+    const auto count = GlobalSize(data)/sizeof(wchar_t);
+    const auto* end = std::find(text,text+count,L'\0');
+    if (end == text+count) return std::nullopt;
+    return std::wstring(text,end);
+}
+bool decimalEditAllowed(HWND edit,std::wstring_view insertion) {
+    DWORD first = 0,last = 0;
+    SendMessageW(edit,EM_GETSEL,reinterpret_cast<WPARAM>(&first),reinterpret_cast<LPARAM>(&last));
+    return decimalReplacement(editText(edit),first,last,insertion);
+}
+LRESULT CALLBACK decimalEditProcedure(HWND edit,UINT message,WPARAM wparam,LPARAM lparam,UINT_PTR identifier,DWORD_PTR) {
+    try {
+        if (message == WM_CHAR && wparam >= 32) {
+            if (wparam > 127) return 0;
+            const wchar_t character = static_cast<wchar_t>(wparam);
+            if (!decimalEditAllowed(edit,std::wstring_view(&character,1))) return 0;
+        }
+        if (message == WM_PASTE || (message == WM_CHAR && wparam == 22) ||
+            (message == WM_KEYDOWN && wparam == VK_INSERT && GetKeyState(VK_SHIFT) < 0)) {
+            const auto text = clipboardText(edit);
+            if (text && decimalEditAllowed(edit,*text))
+                SendMessageW(edit,EM_REPLACESEL,TRUE,reinterpret_cast<LPARAM>(text->c_str()));
+            return 0;
+        }
+    } catch (const std::exception&) {
+        SetDlgItemTextW(GetParent(edit),validationControl,L"Cannot validate the interval text.");
+        return 0;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(edit,decimalEditProcedure,identifier);
+    return DefSubclassProc(edit,message,wparam,lparam);
 }
 HWND control(HWND dialog,const wchar_t* type,const wchar_t* text,int identifier,int x,int y,int width,int height,DWORD style) {
     HWND handle = CreateWindowExW(wcscmp(type,L"EDIT") == 0 ? WS_EX_CLIENTEDGE : 0,type,text,
@@ -113,6 +153,7 @@ void updateSnapshotIntervalControls(HWND dialog) {
 }
 INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam) {
     auto* state = reinterpret_cast<Configuration*>(GetWindowLongPtrW(dialog,DWLP_USER));
+    int invalidControl = 0;
     try {
         if (message == WM_INITDIALOG) {
             state = reinterpret_cast<Configuration*>(lparam); SetWindowLongPtrW(dialog,DWLP_USER,lparam);
@@ -125,50 +166,90 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
             control(dialog,L"STATIC",L"fps (1–240; target 60)",0,272,94,260,24,0);
             label(L"Protein snapshots",126); combo(dialog,playbackControl,126,{L"Latest snapshot",L"Loop available snapshots"},options.loop ? 1 : 0);
             control(dialog,L"STATIC",L"Snapshot interval",snapshotIntervalLabel,16,166,150,24,0);
-            control(dialog,L"EDIT",wide(intervalText(options.snapshotInterval)).c_str(),snapshotIntervalControl,170,162,90,24,WS_TABSTOP | ES_AUTOHSCROLL);
-            control(dialog,L"STATIC",L"seconds (0.05–60)",snapshotIntervalUnits,272,166,260,24,0);
+            HWND interval = control(dialog,L"EDIT",wide(fah::decimalText(options.snapshotInterval)).c_str(),snapshotIntervalControl,170,162,90,24,WS_TABSTOP | ES_AUTOHSCROLL);
+            if (!SetWindowSubclass(interval,decimalEditProcedure,1,0))
+                throw std::runtime_error("Cannot create the interval input control");
+            control(dialog,L"STATIC",L"seconds (minimum 0.05)",snapshotIntervalUnits,272,166,260,24,0);
             updateSnapshotIntervalControls(dialog);
             label(L"Model style",198); combo(dialog,styleControl,198,{L"Space-filling",L"Ball-and-stick",L"Sticks",L"Cycle all three",L"Random"},options.style-1);
             label(L"Background",234); combo(dialog,backgroundControl,234,{L"Light sky and grid",L"Dark sky and grid",L"Solid colour"},options.sky ? (options.darkSky ? 1 : 0) : 2);
             label(L"Solid colour (RGB)",270); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,270,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
             control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,300,370,24,0);
+            control(dialog,L"STATIC",L"",validationControl,16,326,524,24,0);
             control(dialog,L"STATIC",wide("Version " FAH_SAVER_VERSION).c_str(),0,16,360,300,24,0);
             control(dialog,L"BUTTON",L"Save",IDOK,364,354,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
             control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,354,82,28,WS_TABSTOP | BS_PUSHBUTTON);
             return TRUE;
         }
+        if (message == WM_CTLCOLORSTATIC && GetDlgCtrlID(reinterpret_cast<HWND>(lparam)) == validationControl) {
+            HDC context = reinterpret_cast<HDC>(wparam);
+            SetTextColor(context,RGB(176,32,32)); SetBkMode(context,TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_3DFACE));
+        }
+        if (message == WM_COMMAND && (HIWORD(wparam) == EN_CHANGE || HIWORD(wparam) == CBN_SELCHANGE))
+            SetDlgItemTextW(dialog,validationControl,L"");
         if (message == WM_COMMAND && LOWORD(wparam) == playbackControl && HIWORD(wparam) == CBN_SELCHANGE) {
             updateSnapshotIntervalControls(dialog); return TRUE;
         }
         if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
+            invalidControl = sourceControl;
             const auto source = controlText(dialog,sourceControl);
             if (source.empty()) throw std::runtime_error("Set a live source URL");
+            if (source.rfind("ws://",0) != 0 && source.rfind("wss://",0) != 0)
+                throw std::runtime_error("Source URL must begin with ws:// or wss://");
+            Options next = state->options;
+            const auto apply = [&](int identifier,const char* option,const std::string& value) {
+                invalidControl = identifier; next = parseOptions({option,value},next);
+            };
+            apply(sourceControl,"--source",source);
+            apply(unitControl,"--unit",controlText(dialog,unitControl));
+            try { apply(fpsControl,"--fps",controlText(dialog,fpsControl)); }
+            catch (const std::exception&) { throw std::runtime_error("Enter a whole frame-rate limit from 1 to 240 fps."); }
             const int style = int(SendDlgItemMessageW(dialog,styleControl,CB_GETCURSEL,0,0))+1;
             const std::string styleName = style == 4 ? "cycle" : style == 5 ? "random" : std::to_string(style);
+            apply(styleControl,"--style",styleName);
             const auto playback = SendDlgItemMessageW(dialog,playbackControl,CB_GETCURSEL,0,0);
             const auto background = SendDlgItemMessageW(dialog,backgroundControl,CB_GETCURSEL,0,0);
-            if (playback < 0 || playback > 1 || background < 0 || background > 2)
-                throw std::runtime_error("Select valid snapshot playback and background options");
+            invalidControl = playbackControl;
+            if (playback < 0 || playback > 1) throw std::runtime_error("Select valid snapshot playback");
             const bool loop = playback == 1;
+            apply(playbackControl,"--playback",loop ? "loop" : "latest");
+            if (loop) {
+                invalidControl = snapshotIntervalControl;
+                try {
+                    const auto text = controlText(dialog,snapshotIntervalControl);
+                    if (!fah::decimalPartial(text)) throw std::runtime_error("Invalid decimal text");
+                    apply(snapshotIntervalControl,"--snapshot-interval",text);
+                } catch (const std::exception&) {
+                    throw std::runtime_error("Enter a finite interval of at least 0.05 seconds.");
+                }
+            }
+            invalidControl = backgroundControl;
+            if (background < 0 || background > 2) throw std::runtime_error("Select a valid background");
             const std::string backgroundName = background == 0 ? "sky" : background == 1 ? "dark" : "solid";
-            std::vector<std::string> arguments{"--fps",controlText(dialog,fpsControl),"--style",styleName,
-                "--playback",loop ? "loop" : "latest","--snapshot-interval",
-                loop ? controlText(dialog,snapshotIntervalControl) : intervalText(state->options.snapshotInterval),
-                "--background",backgroundName,"--colour",controlText(dialog,colourControl)};
-            arguments.emplace_back("--source"); arguments.push_back(source);
-            arguments.emplace_back("--unit"); arguments.push_back(controlText(dialog,unitControl));
-            state->options = parseOptions(arguments);
-            if (!source.empty() && source.rfind("ws://",0) != 0 && source.rfind("wss://",0) != 0)
-                throw std::runtime_error("Source URL must begin with ws:// or wss://");
-            store(L"Source",source); store(L"Unit",state->options.unit);
-            store(L"FPS",std::to_string(state->options.fps)); store(L"Style",styleName);
+            apply(backgroundControl,"--background",backgroundName);
+            apply(colourControl,"--colour",controlText(dialog,colourControl));
+            invalidControl = 0;
+            store(L"Source",source); store(L"Unit",next.unit);
+            store(L"FPS",std::to_string(next.fps)); store(L"Style",styleName);
             store(L"Playback",loop ? "loop" : "latest");
-            store(L"SnapshotInterval",intervalText(state->options.snapshotInterval)); store(L"Background",backgroundName);
-            store(L"Colour",hexColour(state->options));
+            store(L"SnapshotInterval",fah::decimalText(next.snapshotInterval)); store(L"Background",backgroundName);
+            store(L"Colour",hexColour(next));
+            state->options = std::move(next);
             EndDialog(dialog,IDOK); return TRUE;
         }
         if (message == WM_COMMAND && LOWORD(wparam) == IDCANCEL) { EndDialog(dialog,IDCANCEL); return TRUE; }
-    } catch (const std::exception& error) { errorBox(dialog,error.what()); return TRUE; }
+    } catch (const std::exception& error) {
+        if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
+            SetDlgItemTextW(dialog,validationControl,wide(error.what()).c_str());
+            if (invalidControl) {
+                HWND field = GetDlgItem(dialog,invalidControl); SetFocus(field);
+                wchar_t type[16]{};
+                if (GetClassNameW(field,type,16) && _wcsicmp(type,L"EDIT") == 0) SendMessageW(field,EM_SETSEL,0,-1);
+            }
+        } else { errorBox(dialog,error.what()); EndDialog(dialog,IDCANCEL); }
+        return TRUE;
+    }
     return FALSE;
 }
 void configuration(HWND owner,Options options) {

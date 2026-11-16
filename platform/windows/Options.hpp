@@ -19,7 +19,7 @@ struct Options {
     double seconds = 0;
     int style = 1; // 4 cycles styles; 5 selects them at random.
     bool loop = false;
-    double snapshotInterval = .5;
+    double snapshotInterval = 1;
     bool sky = true;
     bool darkSky = false;
     bool fullscreen = false;
@@ -86,9 +86,8 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
         } else if (key == "--snapshot-interval") {
             std::size_t end = 0;
             options.snapshotInterval = std::stod(value, &end);
-            if (end != value.size() || !std::isfinite(options.snapshotInterval) ||
-                options.snapshotInterval < .05 || options.snapshotInterval > 60)
-                throw std::runtime_error("Snapshot interval must be between 0.05 and 60 seconds");
+            if (end != value.size() || !std::isfinite(options.snapshotInterval) || options.snapshotInterval < .05)
+                throw std::runtime_error("Snapshot interval must be finite and at least 0.05 seconds");
         } else if (key == "--background") {
             if (value != "sky" && value != "dark" && value != "solid")
                 throw std::runtime_error("Background must be sky, dark or solid");
