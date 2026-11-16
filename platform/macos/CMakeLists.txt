@@ -22,17 +22,19 @@ set_target_properties(FAHSaver PROPERTIES
     PREFIX ""
     OUTPUT_NAME "FAHSaver"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+set(FAH_WEB_ASSETS
+    "${PROJECT_SOURCE_DIR}/benchmark/web/saver.html"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/saver.css"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/capture.js"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/scene.js"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/gpu-timer.js"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/renderer.js"
+    "${PROJECT_SOURCE_DIR}/benchmark/web/saver.js")
+set_property(TARGET FAHSaver APPEND PROPERTY LINK_DEPENDS ${FAH_WEB_ASSETS})
 add_custom_command(TARGET FAHSaver POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/web"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${PROJECT_SOURCE_DIR}/benchmark/web/saver.html"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/saver.css"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/capture.js"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/scene.js"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/gpu-timer.js"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/renderer.js"
-        "${PROJECT_SOURCE_DIR}/benchmark/web/saver.js"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${FAH_WEB_ASSETS}
         "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/web"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
         "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/nlohmann-json-LICENSE.MIT")
