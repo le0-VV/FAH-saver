@@ -90,8 +90,10 @@ node benchmark/web/self-test.mjs
 
 The page records requestAnimationFrame callback intervals, draw-callback cadence
 and CPU submission time. These are **not display presentation timestamps**.
-GPU duration and power are explicitly unmeasured. The shipping 60 fps target
-therefore requires OS presentation measurements and the full host/process costs
+GPU duration is sampled asynchronously when the browser exposes a valid elapsed
+timer. Unsupported counters, disjoint events, missing results and dropped samples
+are explicit in `gpuTiming`; see [GPU timing](web/GPU-TIMING.md). Power remains
+unmeasured. The shipping 60 fps target therefore requires OS presentation measurements and the full host/process costs
 from the [comparison plan](../docs/performance-plan.md).
 
 Capture input is limited to 32 MiB, 200000 atoms, 1000000 bonds and 10000 frames,

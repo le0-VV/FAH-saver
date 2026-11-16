@@ -31,6 +31,9 @@ add_dependencies(fah_saver_windows fah_windows_shaders)
 add_custom_command(TARGET fah_saver_windows POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders" "$<TARGET_FILE_DIR:fah_saver_windows>/shaders"
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:fah_saver_windows>" "$<TARGET_FILE_DIR:fah_saver_windows>/fah-preview.exe")
+add_custom_command(TARGET fah_saver_windows POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
+        "$<TARGET_FILE_DIR:fah_saver_windows>/nlohmann-json-LICENSE.MIT")
 
 if(BUILD_TESTING)
     add_executable(fah_windows_options_tests tests/OptionsTests.cpp)
@@ -43,3 +46,4 @@ endif()
 
 install(TARGETS fah_saver_windows RUNTIME DESTINATION .)
 install(FILES ${FAH_SHADERS} DESTINATION shaders)
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT" DESTINATION licences RENAME nlohmann-json-LICENSE.MIT)

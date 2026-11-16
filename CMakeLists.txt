@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment target")
 endif()
+
 project(FAHSaver VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -68,3 +69,5 @@ if(WIN32)
         set_tests_properties(windows_source_cancellation PROPERTIES TIMEOUT 90)
     endif()
 endif()
+
+add_subdirectory(benchmark/windows)

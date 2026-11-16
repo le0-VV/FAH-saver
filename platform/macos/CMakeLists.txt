@@ -17,6 +17,10 @@ set_target_properties(FAHSaver PROPERTIES
     PREFIX ""
     OUTPUT_NAME "FAHSaver"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+add_custom_command(TARGET FAHSaver POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
+        "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/nlohmann-json-LICENSE.MIT")
 
 add_executable(fah_macos_saver_smoke SaverSmoke.mm)
 target_compile_options(fah_macos_saver_smoke PRIVATE -fobjc-arc)
