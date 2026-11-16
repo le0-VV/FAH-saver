@@ -18,7 +18,7 @@ their limits.
 | Initial platforms | macOS and Windows. Keep a future Linux version possible. |
 | Connections | Local host, LAN and remote access through Tailscale. |
 | Data source limit | Keep FAH's 25 MB visualisation cache limit for now. No companion collector. |
-| Loop playback | Loop all available visualisation snapshots of the selected current WU, with a configurable interval (default 0.5 seconds). |
+| Loop playback | Loop all available visualisation snapshots of the selected current WU, with a configurable interval (default 1 second). |
 | Latest playback | Display the latest snapshot and update when another snapshot arrives. |
 | Startup and offline display | Automatically cache one latest complete model for the selected source; show it while live data is unavailable. |
 | Model styles | The current FAH viewer's three styles: space-filling, ball-and-stick and sticks. |
@@ -119,7 +119,9 @@ Light sky/grid remains the default. The options panel shows the loaded saver
 version in its lower-left corner.
 
 Camera rotation is 0.2 radians per second. Loop playback advances a snapshot every
-0.5 seconds by default; its interval accepts 0.05–60 seconds. Latest mode updates
+1 second by default; its interval accepts finite values of at least 0.05 seconds,
+with no imposed upper limit. The options field accepts decimal digits and one
+decimal point, with inline validation instead of a modal alert. Latest mode updates
 when FAH supplies a snapshot and ignores the loop interval. Styles change every
 ten seconds in cycle or random mode. All three model styles frame
 the bonded structure consistently; isolated atoms remain in the scene but can
