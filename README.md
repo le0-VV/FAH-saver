@@ -8,12 +8,16 @@ Metal module, Windows Vulkan host, native FAH connection layer and WebGL
 comparison renderer are implemented. Performance acceptance and system-host
 validation are still in progress.
 
+See the [verification record](docs/verification.md) for measured results and
+their limits.
+
 ## Agreed requirements
 
 | Area | Requirement |
 | --- | --- |
 | Initial platforms | macOS and Windows. Keep a future Linux version possible. |
 | Connections | Local host, LAN and remote access through Tailscale. |
+| Data source limit | Keep FAH's 25 MB visualisation cache limit for now. No companion collector. |
 | Loop playback | Loop all available visualisation snapshots of the selected current WU. |
 | Latest playback | Display the latest snapshot and update when another snapshot arrives. |
 | Model styles | The current FAH viewer's three styles: space-filling, ball-and-stick and sticks. |

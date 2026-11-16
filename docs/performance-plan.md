@@ -1,6 +1,8 @@
 # Rendering and networking comparison
 
-Status: proposed test plan. No performance measurements have been collected.
+Status: proposed test protocol. Initial functional and timing checks have been
+collected; sustained acceptance measurements are still in progress.
+See the [verification record](verification.md) for completed checks and limits.
 The agreed shipping target is 60 fps with a user-configurable frame-rate limit.
 The acceptance thresholds below are proposals, not additional user requirements.
 
