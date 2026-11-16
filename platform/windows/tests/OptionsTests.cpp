@@ -22,6 +22,8 @@ int main() {
     check(!options.fullscreen);
     check(parseOptions({"--fullscreen", "true", "--seconds", "3600"}).fullscreen);
     check(!parseOptions({"--fullscreen", "false"}).fullscreen);
+    const auto size = parseOptions({"--width","1920","--height","1080"});
+    check(size.width == 1920 && size.height == 1080);
     check(parseOptions({"--source", "ws://localhost:7396/api/websocket"}).fps == 60);
     Options saved; saved.source = "ws://localhost:7396/api/websocket";
     check(parseOptions({"--capture", "file.json"},saved).source.empty());
@@ -38,6 +40,10 @@ int main() {
     rejects([] { parseOptions({"--fullscreen", "1"}); });
     rejects([] { parseOptions({"--fullscreen", "TRUE"}); });
     rejects([] { parseOptions({"--fullscreen"}); });
+    rejects([] { parseOptions({"--width","63"}); });
+    rejects([] { parseOptions({"--height","4097"}); });
+    rejects([] { parseOptions({"--width","1280.5"}); });
+    rejects([] { parseOptions({"--height","720extra"}); });
     rejects([] { parseOptions({"--style", "0"}); });
     rejects([] { parseOptions({"--colour", "#abcd"}); });
     rejects([] { parseOptions({"--playback", "other"}); });

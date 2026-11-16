@@ -39,6 +39,10 @@ snapshots. Latest mode retains one snapshot. A disconnection clears the model.
 handlers as `/s`. It defaults to false and is not saved in preferences. Use
 `--seconds 5` for a bounded full-screen smoke test. Explicit durations must be
 positive and no greater than 3600 seconds; omitting duration runs until exit.
+`--width` and `--height` select physical client pixels for windowed comparisons,
+defaulting to 1280 × 720. Both accept whole values from 64 to 4096 and are not
+saved. Full-screen and preview sizes still come from Windows or the preview
+parent. Metrics record the actual client width and height.
 
 Native screensaver entry points:
 

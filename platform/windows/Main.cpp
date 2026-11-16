@@ -198,6 +198,7 @@ struct App {
     POINT initialMouse{};
     std::uint64_t revision = 0,lastRevision = UINT64_MAX,frameCount = 0,gpuCount = 0;
     std::size_t retainedBytes = 0;
+    unsigned drawableWidth = 0,drawableHeight = 0;
     std::size_t lastFrame = SIZE_MAX;
     int lastStyle = 0,randomStyle = 1;
     std::uint64_t stylePeriod = UINT64_MAX;
@@ -295,6 +296,7 @@ struct App {
             << ",\n  \"gpu_timestamp_samples\":" << gpuCount << ",\n  \"gpu_mean_ms\":";
         if (gpuCount) output << gpuTotal/gpuCount; else output << "null";
         output << ",\n  \"peak_working_set_bytes\":" << memory.PeakWorkingSetSize
+            << ",\n  \"drawable_width\":" << drawableWidth << ",\n  \"drawable_height\":" << drawableHeight
             << ",\n  \"presented_frame_timestamps\":null,\n  \"power_watts\":null\n}\n";
         output.close();
         if (!output) throw std::runtime_error("Cannot write metrics output file");
@@ -320,10 +322,14 @@ LRESULT CALLBACK windowProcedure(HWND window,UINT message,WPARAM wparam,LPARAM l
             std::unique_ptr<fah::SourceEvent> event(reinterpret_cast<fah::SourceEvent*>(lparam));
             app->receive(std::move(*event)); return 0;
         }
-        case WM_SIZE:
+        case WM_SIZE: {
+            RECT bounds;
+            if (!GetClientRect(window,&bounds)) throw std::runtime_error("Cannot read native drawable size");
+            app->drawableWidth = unsigned(std::max(0L,bounds.right)); app->drawableHeight = unsigned(std::max(0L,bounds.bottom));
             if (app->renderer) app->renderer->resize();
-            if (app->status) MoveWindow(app->status,24,24,std::max(1,int(LOWORD(lparam))-48),100,TRUE);
+            if (app->status) MoveWindow(app->status,24,24,std::max(1,int(bounds.right)-48),100,TRUE);
             app->redraw = true; return 0;
+        }
         case WM_DISPLAYCHANGE:
             if (app->fullscreen && !SetWindowPos(window,HWND_TOPMOST,
                 GetSystemMetrics(SM_XVIRTUALSCREEN),GetSystemMetrics(SM_YVIRTUALSCREEN),
@@ -402,7 +408,7 @@ int run(const std::vector<std::wstring>& arguments) {
     windowClass.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     windowClass.hCursor = LoadCursorW(nullptr,IDC_ARROW);
     if (!RegisterClassW(&windowClass)) throw std::runtime_error("Cannot register screensaver window");
-    int x = CW_USEDEFAULT,y = CW_USEDEFAULT,width = 1280,height = 720;
+    int x = CW_USEDEFAULT,y = CW_USEDEFAULT,width = int(app.options.width),height = int(app.options.height);
     DWORD style = WS_OVERLAPPEDWINDOW,extended = 0;
     if (app.preview) {
         RECT bounds; if (!GetClientRect(parent,&bounds)) throw std::runtime_error("Cannot read preview size");
@@ -412,11 +418,23 @@ int run(const std::vector<std::wstring>& arguments) {
         x = GetSystemMetrics(SM_XVIRTUALSCREEN); y = GetSystemMetrics(SM_YVIRTUALSCREEN);
         width = GetSystemMetrics(SM_CXVIRTUALSCREEN); height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
         style = WS_POPUP; extended = WS_EX_TOPMOST;
+    } else {
+        RECT bounds{0,0,width,height};
+        if (!AdjustWindowRectExForDpi(&bounds,style,FALSE,extended,GetDpiForSystem()))
+            throw std::runtime_error("Cannot calculate native window size for requested client pixels");
+        width = bounds.right-bounds.left; height = bounds.bottom-bounds.top;
     }
     const HWND window = CreateWindowExW(extended,windowClass.lpszClassName,L"FAH Saver — Vulkan",style,
         x,y,width,height,parent,nullptr,windowClass.hInstance,&app);
     if (!window) throw std::runtime_error("Cannot create screensaver window");
     try {
+        if (!app.preview && !app.fullscreen) {
+            RECT bounds{0,0,LONG(app.options.width),LONG(app.options.height)};
+            if (!AdjustWindowRectExForDpi(&bounds,style,FALSE,extended,GetDpiForWindow(window)) ||
+                !SetWindowPos(window,nullptr,0,0,bounds.right-bounds.left,bounds.bottom-bounds.top,
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+                throw std::runtime_error("Cannot set native client pixel dimensions");
+        }
         app.start(); ShowWindow(window,SW_SHOW); UpdateWindow(window);
         const HANDLE timer = CreateWaitableTimerExW(nullptr,nullptr,0x00000002,TIMER_ALL_ACCESS);
         if (!timer) throw std::runtime_error("High-resolution frame timer unavailable; Windows 10 version 1803 or later is required");

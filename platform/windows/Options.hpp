@@ -15,6 +15,7 @@ struct Options {
     std::string unit;
     std::string metrics;
     unsigned fps = 60;
+    unsigned width = 1280,height = 720;
     double seconds = 0;
     int style = 1; // 4 cycles styles; 5 selects them at random.
     bool loop = false;
@@ -59,6 +60,8 @@ inline Options parseOptions(const std::vector<std::string>& arguments, Options o
         else if (key == "--unit") options.unit = value;
         else if (key == "--metrics") options.metrics = value;
         else if (key == "--fps") options.fps = number(value, 1, 240);
+        else if (key == "--width") options.width = number(value, 64, 4096);
+        else if (key == "--height") options.height = number(value, 64, 4096);
         else if (key == "--seconds") {
             std::size_t end = 0;
             options.seconds = std::stod(value, &end);
