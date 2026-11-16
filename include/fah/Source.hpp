@@ -11,6 +11,8 @@ namespace fah {
 struct SourceOptions {
     std::string url = "ws://127.0.0.1:7396/api/websocket";
     std::string unit;
+    // Deliver only coordinates at or beyond the selected WU's published tail.
+    bool latestOnly = false;
 };
 
 struct SourceEvent {

@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 namespace fah {
@@ -10,6 +11,7 @@ using Json = nlohmann::json;
 constexpr std::size_t maxMessageBytes = 26'000'000;
 constexpr std::size_t maxFrameBytes = 128 * 1024 * 1024;
 constexpr std::size_t maxUnits = 1024;
+constexpr std::size_t maxFrames = 10000;
 
 [[noreturn]] void invalid(const char* detail) {
     throw std::runtime_error(std::string("Invalid FAH message: ") + detail);
@@ -28,12 +30,21 @@ std::int64_t integer(const Json& value) {
     return value.get<std::int64_t>();
 }
 
-struct Unit { std::string id; std::string state; };
-Unit readUnit(const Json& value) {
+std::size_t publishedFrames(const Json& value) {
+    if (!value.is_number_integer() ||
+        (!value.is_number_unsigned() && value.get<std::int64_t>() < 0) ||
+        value.get<std::uint64_t>() > maxFrames)
+        invalid("invalid published visualisation frame count");
+    return static_cast<std::size_t>(value.get<std::uint64_t>());
+}
+
+struct Unit { std::string id; std::string state; std::optional<std::size_t> frames; };
+Unit readUnit(const Json& value, bool latestOnly) {
     if (!value.is_object()) invalid("work unit is not an object");
     Unit unit;
     if (value.contains("id")) unit.id = boundedString(value.at("id"), 1024);
     if (value.contains("state")) unit.state = boundedString(value.at("state"), 64);
+    if (latestOnly && value.contains("frames")) unit.frames = publishedFrames(value.at("frames"));
     return unit;
 }
 }
@@ -89,7 +100,7 @@ struct SourceSession::Impl {
         if (!value.is_array() || value.size() > maxUnits) invalid("invalid work-unit list");
         std::vector<Unit> replacement;
         replacement.reserve(value.size());
-        for (const auto& unit : value) replacement.push_back(readUnit(unit));
+        for (const auto& unit : value) replacement.push_back(readUnit(unit, options.latestOnly));
         units = std::move(replacement);
     }
 
@@ -101,23 +112,28 @@ struct SourceSession::Impl {
             const auto& item = value.at(2);
             if (index == -1) {
                 if (units.size() == maxUnits) invalid("too many work units");
-                units.push_back(readUnit(item));
+                units.push_back(readUnit(item, options.latestOnly));
             } else if (index == -2) {
                 if (!item.is_array() || item.size() > maxUnits - units.size())
                     invalid("invalid work-unit append");
-                for (const auto& unit : item) units.push_back(readUnit(unit));
+                for (const auto& unit : item) units.push_back(readUnit(unit, options.latestOnly));
             } else {
                 if (index < 0 || static_cast<std::size_t>(index) >= units.size())
                     invalid("work-unit index outside list");
                 if (item.is_null()) units.erase(units.begin() + index);
-                else units.at(index) = readUnit(item);
+                else units.at(index) = readUnit(item, options.latestOnly);
             }
         } else if (value.size() == 4) {
             if (index < 0 || static_cast<std::size_t>(index) >= units.size())
                 invalid("work-unit index outside list");
             auto field = boundedString(value.at(2), 128);
-            if (field == "id") units.at(index).id = value.at(3).is_null() ? "" : boundedString(value.at(3), 1024);
+            if (field == "id") {
+                const auto id = value.at(3).is_null() ? "" : boundedString(value.at(3), 1024);
+                if (id != units.at(index).id) units.at(index).frames.reset();
+                units.at(index).id = id;
+            }
             if (field == "state") units.at(index).state = value.at(3).is_null() ? "" : boundedString(value.at(3), 64);
+            if (options.latestOnly && field == "frames") units.at(index).frames = publishedFrames(value.at(3));
         }
         // Nested progress and assignment updates do not affect WU selection.
     }
@@ -149,9 +165,17 @@ struct SourceSession::Impl {
             const auto index = integer(value.at(3));
             if (index < 0 || static_cast<std::size_t>(index) != nextFrame)
                 invalid("non-sequential visualisation frame");
-            if (nextFrame == 10000) invalid("too many visualisation frames");
+            if (nextFrame == maxFrames) invalid("too many visualisation frames");
             const auto bytes = topology->atoms.size() * sizeof(Vec3);
             if (bytes > maxFrameBytes - decodedBytes) invalid("visualisation history exceeds memory limit");
+            std::size_t tail = 0;
+            if (options.latestOnly) {
+                const auto selectedUnit = std::find_if(units.begin(), units.end(),
+                    [&](const Unit& candidate) { return candidate.id == selected; });
+                if (selectedUnit == units.end() || !selectedUnit->frames || !*selectedUnit->frames)
+                    invalid("latest visualisation frame has no positive published count");
+                tail = *selectedUnit->frames - 1;
+            }
             auto frame = std::make_shared<Frame>(parseFrame(value.at(4).dump(), topology->atoms.size()));
             SourceEvent event;
             event.kind = SourceEvent::Kind::Frame;
@@ -159,6 +183,7 @@ struct SourceSession::Impl {
             event.index = nextFrame++;
             decodedBytes += bytes;
             event.frame = std::move(frame);
+            if (options.latestOnly && event.index < tail) return;
             callback(std::move(event));
         } else invalid("unknown visualisation field");
     }
