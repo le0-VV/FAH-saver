@@ -171,11 +171,11 @@ static void referenceMode(ECConfig *config) {
 @property(strong) FAHRenderer *metal;
 @property(strong) ECMetalDriver *driver;
 @property(strong) FAHWebRenderer *web;
-@property(strong) NSDictionary *layout, *baseline, *finalMetrics;
+@property(strong) NSDictionary *layout, *baseline, *finalMetrics, *failureState;
 @property double scale, baselineUptime, finalUptime;
 @property NSInteger actualWidth, actualHeight;
 @property unsigned long long baselineDraws, finalDraws;
-@property BOOL ready, started, sizing;
+@property BOOL ready, started, sizing, finalMetricsFromFailureCache;
 @end
 @implementation ECCanvas @end
 
@@ -183,8 +183,9 @@ static void referenceMode(ECConfig *config) {
     ECConfig *_config;
     NSMutableArray<ECCanvas *> *_canvases;
     NSMutableDictionary *_times;
+    NSMutableArray<NSMutableDictionary *> *_loadingDiagnostics;
     NSString *_phase, *_reason, *_failure;
-    NSTimer *_drawTimer, *_loadingTimer, *_phaseTimer, *_hardTimer, *_collectionTimer;
+    NSTimer *_drawTimer, *_loadingTimer, *_phaseTimer, *_hardTimer, *_collectionTimer, *_diagnosticTimer, *_diagnosticDeadline;
     BOOL _finishing, _cancelled, _terminal;
     int _exitCode;
 }
@@ -207,7 +208,44 @@ static NSNumber *draws(NSDictionary *metrics) {
         @"engine":_config->engine,@"web_backend":[_config->engine isEqual:@"web"]?_config->webBackend:@"not_applicable",
         @"execution_mode":_config->hiddenReference?@"hidden_reference_cli":@"windowed_app",
         @"phase":_phase,@"uptime":@(now()),@"unix_time":@([NSDate date].timeIntervalSince1970)} mutableCopy];
-    [value addEntriesFromDictionary:_times]; if(_failure)value[@"error"]=_failure; if(_cancelled)value[@"cancelled"]=@YES; return value;
+    [value addEntriesFromDictionary:_times]; if(_failure)value[@"error"]=_failure; if(_cancelled)value[@"cancelled"]=@YES;
+    if(_loadingDiagnostics)value[@"loading_diagnostics"]=_loadingDiagnostics;return value;
+}
+- (NSDictionary *)cachedState:(ECCanvas *)canvas {
+    const NSRect bounds=canvas.presentation?canvas.presentation.bounds:NSZeroRect;
+    return @{@"uptime":@(now()),@"harness_view_ready":@(canvas.ready),@"harness_start_requested":@(canvas.started),
+        @"harness_sizing_requested":@(canvas.sizing),@"window_visible":@(canvas.window.visible),
+        @"presentation_present":@(canvas.presentation!=nil),@"presentation_hidden":@(canvas.presentation.isHiddenOrHasHiddenAncestor),
+        @"presentation_has_window":@(canvas.presentation.window!=nil),@"presentation_width_points":@(bounds.size.width),
+        @"presentation_height_points":@(bounds.size.height),@"metal_submissions":@(canvas.driver.submissions),
+        @"metrics":canvas.web?canvas.web.metrics:(canvas.metal.metrics?:@{})};
+}
+- (void)publishLoadingDiagnostics {
+    if(!_terminal&&[_phase isEqual:@"loading"])protect(self,^{writeJSON([self statusRecord],self->_config->status);});
+}
+- (void)captureLoadingDiagnostics {
+    _diagnosticTimer=nil;
+    if(_terminal||_finishing||![_phase isEqual:@"loading"])return;
+    _times[@"loading_diagnostic_uptime"]=@(now());_loadingDiagnostics=[NSMutableArray new];
+    __weak ECHarness *weakSelf=self;
+    for(ECCanvas *canvas in _canvases) {
+        NSMutableDictionary *entry=[@{@"view_index":@(_loadingDiagnostics.count),@"cached_state":[self cachedState:canvas],
+            @"query_state":canvas.web?@"pending":@"not_applicable"} mutableCopy];[_loadingDiagnostics addObject:entry];
+        if(!canvas.web)continue;
+        NSString *script=@"(()=>{const c=document.querySelector('canvas');const r=window.fahSaver;const v={document_ready_state:document.readyState,document_hidden:document.hidden,document_visibility_state:document.visibilityState,device_pixel_ratio:window.devicePixelRatio,canvas_present:!!c,canvas_width:c?c.width:null,canvas_height:c?c.height:null,canvas_client_width:c?c.clientWidth:null,canvas_client_height:c?c.clientHeight:null,runtime_present:!!r};try{v.runtime_metrics=r?r.metrics():null;}catch(e){v.runtime_metrics_failed=true;}return v;})()";
+        @autoreleasepool {[canvas.web evaluateRuntimeScript:script completion:^(id result,NSError *error){@autoreleasepool {
+            ECHarness *owner=weakSelf;if(!owner||owner->_terminal||![entry[@"query_state"] isEqual:@"pending"])return;
+            entry[@"query_completed_uptime"]=@(now());
+            if(error){entry[@"query_state"]=@"error";entry[@"error_domain"]=error.domain;entry[@"error_code"]=@(error.code);}
+            else if([result isKindOfClass:NSDictionary.class]){entry[@"query_state"]=@"complete";entry[@"javascript_state"]=result;}
+            else entry[@"query_state"]=@"invalid_result";
+            [owner publishLoadingDiagnostics];
+        }}];}
+    }
+    [self publishLoadingDiagnostics];
+    _diagnosticDeadline=[NSTimer scheduledTimerWithTimeInterval:3 repeats:NO block:^(NSTimer *timer){(void)timer;ECHarness *owner=weakSelf;if(!owner||owner->_terminal)return;
+        for(NSMutableDictionary *entry in owner->_loadingDiagnostics)if([entry[@"query_state"] isEqual:@"pending"]){entry[@"query_state"]=@"timeout";entry[@"query_timeout_uptime"]=@(now());}
+        owner->_diagnosticDeadline=nil;[owner publishLoadingDiagnostics];}];
 }
 - (void)phase:(NSString *)phase timestamp:(NSString *)key {
     _phase=phase; if(key)_times[key]=@(now()); writeJSON([self statusRecord],_config->status);
@@ -221,6 +259,7 @@ static NSNumber *draws(NSDictionary *metrics) {
     __weak ECHarness *weakSelf=self;
     const double activeBudget=[_config->mode isEqual:@"screenshot"]?0:_config->warmup+_config->measure;
     _hardTimer=[NSTimer scheduledTimerWithTimeInterval:45+activeBudget+_config->cooldown repeats:NO block:^(NSTimer *timer){(void)timer;[weakSelf fail:@"Comparison exceeded its bounded lifetime"];}];
+    _diagnosticTimer=[NSTimer scheduledTimerWithTimeInterval:5 repeats:NO block:^(NSTimer *timer){(void)timer;ECHarness *owner=weakSelf;if(owner)protect(owner,^{[owner captureLoadingDiagnostics];});}];
     NSArray<NSScreen *> *screens=NSScreen.screens; require(screens.count>0,"No display is available");
     for(NSDictionary *layout in _config->layouts) {
         NSUInteger index=[layout[@"screen"] unsignedIntegerValue]; require(index<screens.count,"Requested display is unavailable");
@@ -300,7 +339,7 @@ static NSNumber *draws(NSDictionary *metrics) {
             }
         }
         if(!all||self->_canvases.count!=self->_config->layouts.count)return;
-        [self->_loadingTimer invalidate];self->_loadingTimer=nil;self->_times[@"ready_uptime"]=@(now());
+        [self->_loadingTimer invalidate];self->_loadingTimer=nil;[self->_diagnosticTimer invalidate];self->_diagnosticTimer=nil;self->_times[@"ready_uptime"]=@(now());
         if([self->_config->mode isEqual:@"screenshot"]){[self screenshot];return;}
         [self phase:@"warmup" timestamp:@"warmup_start_uptime"];
         __weak ECHarness *weakSelf=self;
@@ -348,9 +387,10 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (void)releasePresentation {
     @autoreleasepool {
         [_drawTimer invalidate];_drawTimer=nil;[_loadingTimer invalidate];_loadingTimer=nil;[_phaseTimer invalidate];_phaseTimer=nil;
+        [_diagnosticTimer invalidate];_diagnosticTimer=nil;[_diagnosticDeadline invalidate];_diagnosticDeadline=nil;
         for(ECCanvas *canvas in _canvases) {
             canvas.web.stateChanged=nil;[canvas.web stop];[canvas.metal stop];
-            if(canvas.metal&&_times[@"measurement_end_uptime"]&&!_cancelled)canvas.finalMetrics=canvas.metal.metrics;
+            if(canvas.metal&&_times[@"measurement_end_uptime"]&&!_cancelled&&!_failure)canvas.finalMetrics=canvas.metal.metrics;
             if(canvas.metal){((MTKView*)canvas.presentation).delegate=nil;canvas.driver.changed=nil;}
             canvas.window.contentView=[[NSView alloc]initWithFrame:NSMakeRect(0,0,1,1)];
             [canvas.presentation removeFromSuperview];canvas.presentation=nil;
@@ -374,6 +414,8 @@ static NSNumber *draws(NSDictionary *metrics) {
         const double seconds=canvas.finalUptime-canvas.baselineUptime;
         const auto delta=canvas.finalDraws>=canvas.baselineDraws?canvas.finalDraws-canvas.baselineDraws:0;
         [views addObject:@{@"layout":canvas.layout,@"backing_scale":@(canvas.scale),@"actual_width":@(canvas.actualWidth),@"actual_height":@(canvas.actualHeight),@"baseline":canvas.baseline?:@{},@"final":canvas.finalMetrics?:@{},
+            @"final_metrics_source":canvas.finalMetricsFromFailureCache?@"cached_before_failure":(canvas.finalMetrics?@"normal_collection":@"unavailable"),
+            @"failure_state_before_release":canvas.failureState?:@{},
             @"draw_count":@(delta),@"draw_count_elapsed_seconds":@(std::max(0.0,seconds)),
             @"draw_count_rate":@(seconds>0?delta/seconds:0),
             @"cadence_scope":canvas.metal?@"Successful Metal command-buffer submissions; not display presentations":@"WebGL draw calls; not display presentations"}];
@@ -387,7 +429,7 @@ static NSNumber *draws(NSDictionary *metrics) {
         @"snapshot_interval_seconds":@(_config->options.snapshotInterval),@"collect_metrics":@(_config->options.collectMetrics),
         @"gpu_timing_scope":!_config->options.collectMetrics?@"Disabled for normal-cost comparison":([_config->engine isEqual:@"metal"]?@"Metal command-buffer GPU timestamps":@"WebGL timer queries; inspect gpuTiming availability"),
         @"warmup_seconds":@(_config->warmup),@"measure_seconds":@(_config->measure),@"cooldown_seconds":@(_config->cooldown),
-        @"phase_times":_times,@"views":views,@"cancelled":@(_cancelled),@"completion_reason":_reason?:@"bounded_duration",@"error":_failure?:@"",
+        @"phase_times":_times,@"views":views,@"loading_diagnostics":_loadingDiagnostics?:@[],@"cancelled":@(_cancelled),@"completion_reason":_reason?:@"bounded_duration",@"error":_failure?:@"",
         @"presentation_owners_released":@([_phase isEqual:@"stopped"]||[_phase isEqual:@"complete"]),
         @"scope":@"Fixture-only rendering; excludes live FAH, source networking and snapshot cache"};
 }
@@ -405,6 +447,10 @@ static NSNumber *draws(NSDictionary *metrics) {
 - (void)fail:(NSString *)message {
     if(_terminal||[_phase isEqual:@"error"])return;
     _finishing=YES;_exitCode=1;_failure=[message substringToIndex:std::min<NSUInteger>(message.length,1024)];
+    for(ECCanvas *canvas in _canvases) {
+        canvas.failureState=[self cachedState:canvas];
+        if(!canvas.finalMetrics){canvas.finalMetrics=canvas.failureState[@"metrics"];canvas.finalMetricsFromFailureCache=YES;}
+    }
     [self releasePresentation];
     try{[self phase:@"error" timestamp:@"error_uptime"];writeJSON([self report],_config->output);}catch(const std::exception&) {std::fprintf(stderr,"Could not write comparison failure report\n");}
     [self leave];
