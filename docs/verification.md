@@ -189,10 +189,21 @@ Settings showed Version 0.1.6 (7) and no capture-file controls; the user's optio
 were not changed. This is model-readiness and small-options verification, not a
 full-screen or sleep/lock test.
 
-The Windows x64 GUI and console test executables cross-built. Initial native
-console runs passed LiveModel and options checks, but the snapshot-cache check
-reported replacement failure, OS error 5. That failure is under investigation;
-the Windows cache update is not yet runtime-verified.
+The Windows x64 GUI and console test executables cross-built. Native console
+runs passed LiveModel and options checks. The first cache run failed with OS
+error 5; a stage-only probe located it at concurrent reads and replacement.
+Windows publication now uses public FileRenameInfoEx POSIX replacement semantics,
+so existing readers keep the old snapshot and new opens receive the replacement.
+The corrected native cache test passed in 0.169 seconds, including a deterministic
+held-reader check, concurrent replacement and the existing read-only denial
+checks. No retries or read-only override were added. Owned PC test directories
+were removed after each bounded console run.
+
+The final Windows GUI build includes that fix. It was statically checked and
+packaged; full saver UI/rendering of the update was not exercised on Windows.
+The Mac cache check passed again after integration. Rebuilding and signing
+produced byte-identical Mac bundle data to the already installed build, so the
+Windows correction required no Mac replacement.
 
 ## Windows prototype measurements
 
