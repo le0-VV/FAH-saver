@@ -45,6 +45,7 @@ struct DrawTiming {
     bool rendered = false;
     double cpuMilliseconds = 0,gpuMilliseconds = -1;
     PhaseTiming fenceQueryWait,acquire,recordSubmit,present;
+    std::chrono::steady_clock::time_point submittedAt;
 };
 
 class Renderer {

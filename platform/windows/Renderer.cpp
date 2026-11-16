@@ -442,6 +442,7 @@ struct Renderer::Impl {
         submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &finished[image];
         require(vkResetFences(device,1,&fence), "Reset submission fence");
         require(vkQueueSubmit(queue,1,&submit,fence), "Submit frame");
+        if (diagnostics) timing.submittedAt = std::chrono::steady_clock::now();
         queryWritten = bool(queries);
         timing.recordSubmit = recordTimer.finish();
         PhaseTimer presentTimer(diagnostics);

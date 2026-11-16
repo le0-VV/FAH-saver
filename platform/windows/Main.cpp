@@ -177,6 +177,13 @@ double processSeconds() {
     const auto value = [](FILETIME time) { return (std::uint64_t(time.dwHighDateTime)<<32) | time.dwLowDateTime; };
     return double(value(kernel)+value(user))/1e7;
 }
+struct BenchmarkPoint { Clock::time_point wall; double processCPU,threadCPU; };
+BenchmarkPoint benchmarkPoint() { return {Clock::now(),processSeconds(),threadCpuMilliseconds()/1000}; }
+void writeInterval(std::ostream& output,const char* name,const BenchmarkPoint& begin,const BenchmarkPoint& end,const char* scope) {
+    output << ",\n  \"" << name << "\":{\"elapsed_seconds\":" << std::chrono::duration<double>(end.wall-begin.wall).count()
+        << ",\"cpu_process_seconds\":" << end.processCPU-begin.processCPU
+        << ",\"main_thread_cpu_seconds\":" << end.threadCPU-begin.threadCPU << ",\"scope\":\"" << scope << "\"}";
+}
 std::string escaped(const std::string& text) {
     std::string result;
     for (const unsigned char c : text) {
@@ -207,6 +214,9 @@ struct App {
     std::uint64_t stylePeriod = UINT64_MAX;
     std::mt19937 random{std::random_device{}()};
     Clock::time_point started = Clock::now();
+    Clock::time_point firstSubmission,lastSubmission;
+    BenchmarkPoint activeEnd{},shutdownEnd{};
+    bool activeEnded = false,shutdownEnded = false;
     double cpuStarted = 0,cpuDrawTotal = 0,gpuTotal = 0,cpuDrawMaximum = 0;
     double threadCpuStarted = 0;
     std::string failure;
@@ -238,6 +248,12 @@ struct App {
         MSG event;
         while (PeekMessageW(&event,window,sourceMessage,sourceMessage,PM_REMOVE))
             delete reinterpret_cast<fah::SourceEvent*>(event.lParam);
+    }
+    void snapshotActiveEnd() {
+        if (benchmark && !activeEnded) { activeEnd = benchmarkPoint(); activeEnded = true; }
+    }
+    void snapshotShutdownEnd() {
+        if (benchmark && !shutdownEnded) { shutdownEnd = benchmarkPoint(); shutdownEnded = true; }
     }
     void receive(fah::SourceEvent event) {
         switch (event.kind) {
@@ -288,13 +304,17 @@ struct App {
         }
         if (benchmark && timing.rendered) {
             ++frameCount; cpuDrawTotal += timing.cpuMilliseconds;
+            if (frameCount == 1) firstSubmission = timing.submittedAt;
+            lastSubmission = timing.submittedAt;
             cpuDrawMaximum = std::max(cpuDrawMaximum,timing.cpuMilliseconds);
             if (timing.gpuMilliseconds >= 0) { ++gpuCount; gpuTotal += timing.gpuMilliseconds; }
         }
     }
     void metrics() {
         if (options.metrics.empty()) return;
-        const double elapsed = std::chrono::duration<double>(Clock::now()-started).count();
+        if (!activeEnded || !shutdownEnded) throw std::runtime_error("Benchmark shutdown snapshots are missing");
+        const BenchmarkPoint begin{started,cpuStarted,threadCpuStarted/1000},lifecycleEnd = benchmarkPoint();
+        const double elapsed = std::chrono::duration<double>(lifecycleEnd.wall-started).count();
         PROCESS_MEMORY_COUNTERS memory{}; memory.cb = sizeof(memory);
         if (!GetProcessMemoryInfo(GetCurrentProcess(),&memory,sizeof(memory)))
             throw std::runtime_error("Cannot read process memory metrics");
@@ -303,14 +323,29 @@ struct App {
         output << std::setprecision(10) << "{\n  \"backend\":\"vulkan\",\n  \"adapter\":\"" << escaped(adapterName)
             << "\",\n  \"elapsed_seconds\":" << elapsed << ",\n  \"submitted_frames\":" << frameCount
             << ",\n  \"submit_rate_fps\":" << (elapsed > 0 ? frameCount/elapsed : 0)
-            << ",\n  \"cpu_process_seconds\":" << processSeconds()-cpuStarted
+            << ",\n  \"cpu_process_seconds\":" << lifecycleEnd.processCPU-cpuStarted
             << ",\n  \"cpu_draw_call_mean_ms\":" << (frameCount ? cpuDrawTotal/frameCount : 0)
             << ",\n  \"cpu_draw_call_max_ms\":" << cpuDrawMaximum
             << ",\n  \"gpu_timestamp_samples\":" << gpuCount << ",\n  \"gpu_mean_ms\":";
         if (gpuCount) output << gpuTotal/gpuCount; else output << "null";
         output << ",\n  \"peak_working_set_bytes\":" << memory.PeakWorkingSetSize
-            << ",\n  \"drawable_width\":" << drawableWidth << ",\n  \"drawable_height\":" << drawableHeight
-            << ",\n  \"diagnostics\":{\n    \"main_thread_cpu_seconds\":" << (threadCpuMilliseconds()-threadCpuStarted)/1000
+            << ",\n  \"drawable_width\":" << drawableWidth << ",\n  \"drawable_height\":" << drawableHeight;
+        writeInterval(output,"lifecycle_interval",begin,lifecycleEnd,"Post-setup start to metrics collection; includes active interval and shutdown, excludes initialisation and result writing");
+        writeInterval(output,"active_interval",begin,activeEnd,"Post-setup start to WM_DESTROY entry, before source stop and renderer destruction");
+        writeInterval(output,"shutdown_interval",activeEnd,shutdownEnd,"WM_DESTROY entry through source stop and renderer destruction");
+        output << ",\n  \"legacy_top_level_timing_scope\":\"elapsed_seconds, cpu_process_seconds and submit_rate_fps use lifecycle_interval; the legacy rate is submissions per lifecycle second, not display FPS\""
+            << ",\n  \"submission_call_cadence\":{\"scope\":\"Successful vkQueueSubmit return timestamps; excludes initialisation and teardown; not displayed-frame timestamps\",\"interval_count\":" << (frameCount ? frameCount-1 : 0)
+            << ",\"first_seconds_after_active_start\":";
+        if (frameCount) output << std::chrono::duration<double>(firstSubmission-started).count(); else output << "null";
+        output << ",\"last_seconds_after_active_start\":";
+        if (frameCount) output << std::chrono::duration<double>(lastSubmission-started).count(); else output << "null";
+        output << ",\"interval_seconds\":";
+        const double cadence = frameCount > 1 ? std::chrono::duration<double>(lastSubmission-firstSubmission).count() : 0;
+        if (frameCount > 1) output << cadence; else output << "null";
+        output << ",\"calls_per_second\":";
+        if (cadence > 0) output << (frameCount-1)/cadence; else output << "null";
+        output << "},\n  \"diagnostics\":{\n    \"main_thread_cpu_seconds\":" << lifecycleEnd.threadCPU-begin.threadCPU
+            << ",\n    \"main_thread_cpu_scope\":\"lifecycle_interval\""
             << ",\n    \"pump_iterations\":" << pumpIterations << ",\n    \"messages_dispatched\":" << messagesDispatched
             << ",\n    \"render_calls\":" << renderCalls << ",\n    \"timer_wakes\":" << timerWakes
             << ",\n    \"input_queue_wakes\":" << inputQueueWakes << ",\n    \"phase_totals\":{";
@@ -388,7 +423,9 @@ LRESULT CALLBACK windowProcedure(HWND window,UINT message,WPARAM wparam,LPARAM l
         case WM_SETCURSOR:
             if (app->fullscreen) { SetCursor(nullptr); return TRUE; } break;
         case WM_CLOSE: DestroyWindow(window); return 0;
-        case WM_DESTROY: app->stop(); app->renderer.reset(); PostQuitMessage(0); return 0;
+        case WM_DESTROY:
+            app->snapshotActiveEnd(); app->stop(); app->renderer.reset(); app->snapshotShutdownEnd();
+            PostQuitMessage(0); return 0;
         }
     } catch (const std::exception& error) {
         app->failed = true; app->failure = error.what(); PostMessageW(window,WM_CLOSE,0,0); return 0;

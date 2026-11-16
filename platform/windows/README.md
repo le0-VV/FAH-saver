@@ -78,6 +78,16 @@ cleanup. Sampling overhead is included; there is no per-frame logging. CPU time
 uses `GetThreadTimes`, whose reported units do not guarantee scheduling precision.
 These diagnostics and Vulkan timestamp queries are disabled without `--metrics`.
 
+Timing scopes are separate. `active_interval` stops at entry to `WM_DESTROY`,
+before source stop or renderer destruction. `shutdown_interval` covers that
+source/device shutdown. `lifecycle_interval` continues from the same post-setup
+start until metrics collection, including shutdown. The legacy top-level elapsed,
+CPU and rate fields retain that lifecycle scope; their labels do not establish
+active pacing. Initial renderer/capture setup and result writing are excluded.
+`submission_call_cadence` uses first/last successful `vkQueueSubmit` return
+timestamps and `(count - 1) / interval`. It excludes setup and teardown and
+measures submit calls, not displayed frames. One submission has no cadence rate.
+
 Validate a completed capture trial with:
 
 ```powershell
