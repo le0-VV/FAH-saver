@@ -86,14 +86,29 @@ The original native elapsed interval also included renderer teardown, so its
 The browser reported 60 callbacks/s. Both candidates used the Radeon RX 9060 XT;
 WebView2 used ANGLE/D3D11 and runtime 157.0.4341.46.
 
-The short native run reported unexpectedly high CPU use. A diagnostic follow-up
+The short native run reported unexpectedly high CPU use. An initial diagnostic follow-up
 measured 3.938 process CPU seconds over 5.246 wall seconds, with only 0.109 CPU
 seconds on the GUI/main thread. It recorded 304 pump iterations, 299 timer wakes
 and four input-queue wakes. Those counts give no evidence of a large application
 message-loop spin. A run without metrics still used 4.109 process CPU seconds
 over a 5.434-second whole-process lifetime; its GUI thread used 0.219 CPU seconds.
 The remaining CPU belongs to other process threads. Their identity and stacks
-have not been measured, so a driver cause is not yet established.
+were not identified by those counters.
+
+The corrected interval report then measured 4.266 process CPU seconds during
+5.013 active seconds, with only 0.016 CPU seconds during 0.224 seconds of source
+and device shutdown. Successful submission-call cadence was 60.06 calls/s.
+This confirms that the old lifecycle rate understated active submission cadence;
+it still does not measure display presentation.
+
+A fifteen-second normal run, with metrics disabled, showed the CPU cost settling.
+Between samples at 6.008 and 14.002 wall seconds, process CPU increased by about
+0.188 seconds and GUI/main-thread CPU by about 0.156 seconds. That is about 2.4%
+of one logical CPU for the process over that later interval. Total CPU was 4.453
+seconds for the fifteen-second run, close to the five-second normal run's 4.422
+seconds. This supports a several-second startup-period burst rather than a
+persistent one-core rendering load. Worker ownership still needs attribution;
+the timings alone do not establish a driver cause.
 
 The browser's observed process CPU includes startup and can omit unobserved
 processes; it is not directly comparable to native post-initialisation CPU.
@@ -106,12 +121,13 @@ phases without per-frame logging. They do not identify the other worker threads.
 
 ## Remaining acceptance work
 
-Resolve Windows CPU cost, then use the [comparison protocol](performance-plan.md)
-for sustained, repeated measurements. Full system screensaver installation,
+Attribute the Windows startup burst and compare later browser CPU intervals,
+then use the [comparison protocol](performance-plan.md) for sustained, repeated
+measurements. Full system screensaver installation,
 lock/sleep recovery, mixed-display behaviour, signed release distribution,
 off-site operation and paired FAH-throughput impact remain unverified.
 
-PC access and testing are on hold at the user's request so they can game. The
-completed cleanup audit found no test processes or temporary tasks remaining.
-The root agent closed its temporary LAN and Tailscale SSH tunnels. Further
-runtime checks require the user to release the PC; local source work can proceed.
+PC access and testing were paused while the user gamed. The completed cleanup
+audit found no test processes or temporary tasks remaining, and the temporary
+LAN and Tailscale SSH tunnels were closed. The user then explicitly released the
+PC with “done gaming”; bounded development checks have resumed.
