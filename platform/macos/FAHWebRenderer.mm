@@ -70,6 +70,8 @@ static void configureSharedSession(WKWebViewConfiguration *configuration) {
     if (_webView) return _webView;
     ++_generation;
     _ready = _busy = _started = NO;
+    _measuring = _measurementPending;
+    _javascriptMetrics = nil;
     _lastError = nil;
     _sentIdentity = nullptr; _sentFrames = _sentRevision = 0;
     _optionsDirty = YES;
@@ -109,7 +111,7 @@ static void configureSharedSession(WKWebViewConfiguration *configuration) {
 }
 - (void)start { _running = YES; [self pump]; }
 - (void)stop {
-    _running = _ready = _started = _busy = _measuring = _measurementPending = NO; ++_generation;
+    _running = _ready = _started = _busy = _measurementPending = NO; ++_generation;
     if (_webView) {
         // Releasing the page also terminates its rAF/context if script execution is interrupted.
         [_webView evaluateJavaScript:@"window.fahSaver && window.fahSaver.dispose()" completionHandler:nil];

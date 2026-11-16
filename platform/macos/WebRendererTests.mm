@@ -137,7 +137,12 @@ int main(int argc,const char *argv[]) {
             auto cancelled = std::make_shared<bool>(false);
             __block NSError *cancelError;
             [renderer renderAt:999 completion:^(NSDictionary *metrics,NSError *error) { cancelError = error; *cancelled = true; }];
+            NSNumber *measuredBeforeStop = [renderer metrics][@"submitted_frames"];
+            check([[renderer metrics][@"draws"] unsignedIntegerValue] > measuredBeforeStop.unsignedIntegerValue,
+                  "Counter regression requires a lifetime count larger than the measurement count");
             @autoreleasepool { [renderer stop]; }
+            check([[renderer metrics][@"submitted_frames"] isEqual:measuredBeforeStop],
+                  "Stopping changed the submission count without rendering");
             waitFor([&]{return *cancelled;},"Cancelled fixed-time render never completed");
             check(cancelError != nil,"Old-page fixed-time render was accepted after stop");
             waitFor([&]{return old == nil;},"Stop retained the old WebView");

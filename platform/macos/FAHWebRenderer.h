@@ -19,6 +19,7 @@
 - (void)stop;
 // Requests made while the page loads are applied once it is ready; stop cancels them.
 - (void)beginMeasurement;
+// Returns the last bridge snapshot; refreshMetrics requests a new snapshot from the page.
 - (NSDictionary *)metrics;
 - (void)refreshMetrics:(void (^)(NSDictionary *metrics))completion;
 // A stopped or replaced page completes with a cancellation error.
