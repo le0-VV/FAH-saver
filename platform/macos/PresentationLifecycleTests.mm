@@ -15,19 +15,19 @@ static void drain() {
     [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.06]];
 }
 
-static MTKView *presentationView(FAHSaverView *view) {
-    MTKView *found = nil;
+static WKWebView *presentationView(FAHSaverView *view) {
+    WKWebView *found = nil;
     for (NSView *child in view.subviews)
-        if ([child isKindOfClass:MTKView.class]) {
+        if ([child isKindOfClass:WKWebView.class]) {
             check(found == nil,"A saver owns more than one presentation view");
-            found = (MTKView *)child;
+            found = (WKWebView *)child;
         }
     return found;
 }
 
 static void expectStopped(FAHSaverView *view) {
     check(!view.isAnimating && !view.hasActiveSource,"Hidden/detached saver remains active");
-    check(!presentationView(view),"Stopped saver retains its Metal presentation owner");
+    check(!presentationView(view),"Stopped saver retains its WebKit presentation owner");
     check(![[view renderMetrics][@"cache_worker_active"] boolValue],"Stopped saver retains its cache worker");
     const auto animation = view.animationCallbackCount, source = view.sourceCallbackCount;
     NSNumber *submitted = [view renderMetrics][@"submitted_frames"];
@@ -92,19 +92,19 @@ int main(int argc, const char *argv[]) {
                 @autoreleasepool { [view startAnimation]; drain(); }
                 const unsigned starts = counters->starts, stops = counters->stops;
                 NSDictionary *running = [view renderMetrics];
-                __weak MTKView *oldView;
+                __weak WKWebView *oldView;
                 __weak CALayer *oldLayer;
                 @autoreleasepool {
-                    MTKView *metal = presentationView(view);
-                    check(metal != nil,"Running saver lacks its presentation view");
-                    oldView = metal; oldLayer = metal.layer;
+                    WKWebView *web = presentationView(view);
+                    check(web != nil,"Running saver lacks its presentation view");
+                    oldView = web; oldLayer = web.layer;
                     if (cycle%3 == 0) view.hidden = YES;
                     else if (cycle%3 == 1) host.hidden = YES;
                     else [view removeFromSuperview];
                 }
                 expectStopped(view); drain();
-                check(!oldView,"Suspended saver retains an old Metal view after draining");
-                check(!oldLayer,"Suspended saver retains an old Metal layer after draining");
+                check(!oldView,"Suspended saver retains an old WebKit view after draining");
+                check(!oldLayer,"Suspended saver retains an old WebKit layer after draining");
                 check(counters->stops == stops+1,"Suspension did not stop its source exactly once");
                 check([[view renderMetrics][@"drawable_width"] isEqual:running[@"drawable_width"]] &&
                       [[view renderMetrics][@"drawable_height"] isEqual:running[@"drawable_height"]],
@@ -140,7 +140,7 @@ int main(int argc, const char *argv[]) {
             [window close]; expectStopped(view);
             [view startAnimation]; [view stopAnimation]; expectStopped(view);
             counters->beforeStart = {};
-            std::puts("Presentation lifecycle passed: initial windowless start, 20 retained-view hide/detach/resume cycles, released Metal owners, stopped callbacks and explicit-stop precedence");
+            std::puts("Presentation lifecycle passed: initial windowless start, 20 retained-view hide/detach/resume cycles, released WebKit owners, stopped callbacks and explicit-stop precedence");
             return 0;
         } catch (const std::exception& exception) {
             std::fprintf(stderr,"Presentation lifecycle: %s\n",exception.what());

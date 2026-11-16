@@ -107,8 +107,8 @@ static void cacheError(const std::string& message) {
 }
 
 @implementation FAHSaverView {
-    MTKView *_metalView;
-    FAHRenderer *_renderer;
+    WKWebView *_webView;
+    FAHWebRenderer *_renderer;
     NSTextField *_status;
     NSUserDefaults *_defaults;
     FAHRenderOptions _options;
@@ -158,7 +158,10 @@ static void cacheError(const std::string& message) {
         @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @1,
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
-    _renderer = [[FAHRenderer alloc] initWithDevice:MTLCreateSystemDefaultDevice() error:&error];
+    NSURL *assets = [[NSBundle bundleForClass:self.class] URLForResource:@"web" withExtension:nil];
+    _renderer = [[FAHWebRenderer alloc] initWithAssetsURL:assets error:&error];
+    __weak FAHSaverView *weakRendererOwner = self;
+    _renderer.stateChanged = ^{ [weakRendererOwner updateStatus]; };
     _status = [NSTextField wrappingLabelWithString:error.localizedDescription ?: @"Connecting to Folding@home…"];
     _status.textColor = NSColor.whiteColor;
     _status.drawsBackground = YES;
@@ -171,7 +174,7 @@ static void cacheError(const std::string& message) {
         [_status.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
         [_status.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor multiplier:.85] ]];
     _connectionStatus = error.localizedDescription ?: @"Connecting to Folding@home…";
-    if (!_renderer) _configurationError = error.localizedDescription ?: @"The Metal renderer could not be created.";
+    if (!_renderer) _configurationError = error.localizedDescription ?: @"The Web renderer could not be created.";
     [self loadOptions];
     [self prepareCache];
     [self updateStatus];
@@ -261,10 +264,11 @@ static void cacheError(const std::string& message) {
 }
 - (NSDictionary *)renderMetrics {
     NSMutableDictionary *result = [[_renderer metrics] mutableCopy];
-    const CGSize size = _metalView ? _metalView.drawableSize : _lastDrawableSize;
+    const CGFloat scale = self.window ? self.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor;
+    const CGSize size = _webView ? CGSizeMake(_webView.bounds.size.width*scale,_webView.bounds.size.height*scale) : _lastDrawableSize;
     result[@"drawable_width"] = @(size.width);
     result[@"drawable_height"] = @(size.height);
-    result[@"drawing_mode"] = @"ScreenSaverView animateOneFrame";
+    result[@"drawing_mode"] = @"WebKit requestAnimationFrame";
     result[@"animation_callbacks"] = @(_animationCallbackCount-_measurementCallbackBaseline);
     result[@"model_available"] = @(_model.available());
     result[@"using_cached_model"] = @(_model.usingFallback());
@@ -287,7 +291,7 @@ static void cacheError(const std::string& message) {
 - (void)receiveSourceEvent:(const fah::SourceEvent&)event {
     const auto previous = _model.revision();
     const bool fresh = _model.receive(event, _options.loop);
-    if (_model.revision() != previous) [_renderer setCapture:_model.capture()];
+    if (fresh || _model.revision() != previous) [_renderer setCapture:_model.capture()];
     if (event.kind == fah::SourceEvent::Kind::Status || event.kind == fah::SourceEvent::Kind::Error)
         _connectionStatus = [NSString stringWithUTF8String:event.text.c_str()];
     else if (fresh) _connectionStatus = nil;
@@ -352,20 +356,14 @@ static void cacheError(const std::string& message) {
 - (void)animateOneFrame {
     if (!self.isAnimating) return;
     ++_animationCallbackCount;
-    [_metalView draw];
+    // WebKit owns its frame clock; this callback does not send JavaScript IPC.
     [self updateStatus];
 }
 
 - (void)preparePresentationView {
-    if (_metalView) return;
-    _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_renderer.device];
-    _metalView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    _metalView.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
-    _metalView.framebufferOnly = YES;
-    _metalView.paused = YES;
-    _metalView.enableSetNeedsDisplay = NO;
-    _metalView.delegate = _renderer;
-    [self addSubview:_metalView positioned:NSWindowBelow relativeTo:_status];
+    if (_webView) return;
+    _webView = [_renderer prepareWithFrame:self.bounds];
+    [self addSubview:_webView positioned:NSWindowBelow relativeTo:_status];
 }
 
 - (void)stopAnimationResources {
@@ -380,15 +378,13 @@ static void cacheError(const std::string& message) {
         catch (const std::exception& exception) { cacheError(exception.what()); }
         _cache.reset();
     }
+    if (_webView) {
+        const CGFloat scale = self.window ? self.window.backingScaleFactor : NSScreen.mainScreen.backingScaleFactor;
+        _lastDrawableSize = CGSizeMake(_webView.bounds.size.width*scale,_webView.bounds.size.height*scale);
+    }
     [_renderer stop];
     [_renderer setCapture:nullptr];
-    if (_metalView) {
-        _lastDrawableSize = _metalView.drawableSize;
-        _metalView.delegate = nil;
-        [_metalView releaseDrawables];
-        [_metalView removeFromSuperview];
-        _metalView = nil;
-    }
+    _webView = nil;
 }
 
 - (void)stopAnimation {

@@ -1,7 +1,7 @@
 #pragma once
 
 #import <ScreenSaver/ScreenSaver.h>
-#import "FAHRenderer.h"
+#import "FAHWebRenderer.h"
 #include "fah/Source.hpp"
 #include <filesystem>
 #include <functional>

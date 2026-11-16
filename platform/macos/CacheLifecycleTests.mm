@@ -55,6 +55,24 @@ static void expectModel(FAHSaverView *view, std::size_t atoms, std::size_t frame
     check(![metrics[@"connection_message_visible"] boolValue],"Connection text covers a valid model");
 }
 
+static void expectWebFrame(FAHSaverView *view, std::size_t frames) {
+    FAHWebRenderer *renderer = [view valueForKey:@"renderer"];
+    const double deadline = NSProcessInfo.processInfo.systemUptime+20;
+    while (!renderer.lastError && (!renderer.ready || [[renderer metrics][@"pending_updates"] boolValue]) &&
+           NSProcessInfo.processInfo.systemUptime < deadline)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    if (renderer.lastError) throw std::runtime_error(renderer.lastError.UTF8String);
+    check(renderer.ready && ![[renderer metrics][@"pending_updates"] boolValue],"Bundled Web renderer was not ready");
+    __block BOOL finished = NO;
+    __block NSDictionary *metrics;
+    __block NSError *failure;
+    [renderer renderAt:0 completion:^(NSDictionary *value,NSError *error) { metrics = value; failure = error; finished = YES; }];
+    while (!finished && NSProcessInfo.processInfo.systemUptime < deadline)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    check(finished && !failure && [metrics[@"draws"] unsignedIntegerValue] > 0 &&
+          [metrics[@"snapshotCount"] unsignedIntegerValue] == frames,"Bundled Web renderer did not draw the cached/live model");
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         try {
@@ -92,6 +110,7 @@ int main(int argc, const char *argv[]) {
             [view startAnimation];
             check(control->starts == 1,"Injected source did not start");
             check(!control->options.latestOnly,"Loop mode requested latest-only source data");
+            expectWebFrame(view,1);
             control->send(event(fah::SourceEvent::Kind::Status));
             control->send(event(fah::SourceEvent::Kind::Error));
             control->send(event(fah::SourceEvent::Kind::Reset));
@@ -112,6 +131,7 @@ int main(int argc, const char *argv[]) {
             auto newest = std::make_shared<fah::Frame>(*frame); newest->front().x += .25f;
             frameEvent.frame = newest; control->send(frameEvent);
             expectModel(view,topology->atoms.size(),2,false);
+            expectWebFrame(view,2);
             control->send(event(fah::SourceEvent::Kind::Reset));
             expectModel(view,topology->atoms.size(),1,true);
             control->send(event(fah::SourceEvent::Kind::Error));
@@ -134,6 +154,7 @@ int main(int argc, const char *argv[]) {
             [restarted startAnimation];
             check(control->options.latestOnly,"Follow latest did not suppress the source's published history");
             expectModel(restarted,topology->atoms.size(),1,true);
+            expectWebFrame(restarted,1);
             [restarted stopAnimation];
             [preferences.defaults setObject:@"another-work-unit" forKey:@"unit"];
             [restarted startAnimation];
