@@ -3,7 +3,7 @@ if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment target")
 endif()
 
-project(FAHSaver VERSION 0.1.9 LANGUAGES CXX)
+project(FAHSaver VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +70,7 @@ if(APPLE)
     target_compile_options(fah_web_benchmark PRIVATE -fobjc-arc -Wall -Wextra)
     target_link_libraries(fah_web_benchmark PRIVATE "-framework AppKit" "-framework WebKit")
     add_subdirectory(platform/macos)
+    add_subdirectory(benchmark/macos)
     if(BUILD_TESTING)
         find_package(Python3 REQUIRED COMPONENTS Interpreter)
         add_test(NAME mac_source_diagnostics COMMAND "${Python3_EXECUTABLE}"
