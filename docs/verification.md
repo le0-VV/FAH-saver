@@ -107,13 +107,55 @@ Between samples at 6.008 and 14.002 wall seconds, process CPU increased by about
 of one logical CPU for the process over that later interval. Total CPU was 4.453
 seconds for the fifteen-second run, close to the five-second normal run's 4.422
 seconds. This supports a several-second startup-period burst rather than a
-persistent one-core rendering load. Worker ownership still needs attribution;
-the timings alone do not establish a driver cause.
+persistent one-core rendering load.
+
+A separate process-specific PSS attribution run matched nine thread lifetimes
+across about 1.504 seconds. Its hot worker used 0.796875 kernel and 0.5625 user CPU
+seconds, with a thread entry point in `amdvlk64.dll`. All 24 instruction-location
+samples mapped to `ntdll.dll`. This identifies the hot startup thread's driver
+entry point, not the exact operation or call stack. It does not prove shader
+compilation or justify changing the application's frame timer. Context capture
+can perturb the target, so this run is attribution evidence, not a benchmark.
 
 The browser's observed process CPU includes startup and can omit unobserved
 processes; it is not directly comparable to native post-initialisation CPU.
 Browser working-set sums can double-count shared pages. Power and complete
 browser process cost are unmeasured. No stack winner is established by this pair.
+
+The first longer browser CPU-series attempt failed before measurement with a
+frame-index error. A queued animation timestamp could precede the new start
+epoch slightly; loop mode then selected frame -1. A regression test reproduced
+that boundary. Playback, camera and style time now start at zero, and the test
+passes. The failed attempt is excluded from timing comparisons.
+
+The corrected fifteen-second browser CPU-series retry passed at 1280 × 720,
+ball-and-stick, loop playback, sky/grid and a 60 fps cap. Between host-time samples
+6.0686499 and 14.0696594 seconds, observed browser CPU increased by 1.34375 seconds;
+the reported host CPU counter did not increase at its available resolution.
+The five retained browser processes and inventory coverage stayed stable, with
+no reported access/sampling errors and no dropped series entries.
+
+| Later-interval CPU | Native normal path | WebView2 host + observed group |
+| --- | ---: | ---: |
+| CPU seconds per wall second | 0.02346 | 0.16795 |
+| Equivalent share of one logical CPU | 2.35% | 16.79% |
+
+The observed browser rate is about seven times the native rate in these small
+sequential trials. The browser had GPU queries and process sampling enabled;
+the native normal run had metrics disabled. Browser inventory excludes crashpad
+and can miss short-lived processes, so this is indicative rather than a complete
+system-cost comparison. FAH continued running throughout the tests.
+
+The browser produced 902 draw callbacks in 15.0148 seconds, or 60.0075 callbacks/s.
+Mean GPU-query duration was 0.7589 ms, with 901 completed queries and one final
+pending query excluded. This is similar in scale to the earlier native GPU
+sample, but the trials do not establish a general GPU-time winner. Display
+presentation, power and GPU memory remain unmeasured on the Windows comparison.
+
+These observations support keeping the requested native stack as the initial
+implementation. They do not replace sustained acceptance tests. The corrected
+browser trial removed its temporary profile, and its cleanup audit found no
+remaining own processes or temporary tasks.
 
 The normal native path now disables benchmark timestamp queries and counters.
 Opt-in aggregate diagnostics record application-thread CPU and wait/record/present
@@ -121,8 +163,7 @@ phases without per-frame logging. They do not identify the other worker threads.
 
 ## Remaining acceptance work
 
-Attribute the Windows startup burst and compare later browser CPU intervals,
-then use the [comparison protocol](performance-plan.md) for sustained, repeated
+Use the [comparison protocol](performance-plan.md) for sustained, repeated
 measurements. Full system screensaver installation,
 lock/sleep recovery, mixed-display behaviour, signed release distribution,
 off-site operation and paired FAH-throughput impact remain unverified.

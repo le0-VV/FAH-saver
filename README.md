@@ -41,8 +41,11 @@ data, playback and scene definitions independent of Windows APIs where practical
 A future Linux version will still need its own host and platform integration.
 Linux is not part of the initial release.
 
-The macOS candidate remains direct Metal. A Vulkan-on-Metal layer is not an
-agreed dependency. Native rendering remains a preference, not a measured result.
+The initial implementation keeps direct Metal on macOS and Vulkan on Windows.
+The short hardware checks support this choice: native rendering meets the tested
+cadence and uses less later-interval CPU than the observed browser comparison.
+Browser hosts remain available for regression comparisons. A Vulkan-on-Metal
+layer is not required. Sustained performance acceptance is still open.
 
 ## Build and run
 
