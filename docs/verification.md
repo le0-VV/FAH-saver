@@ -372,6 +372,92 @@ Settings full-screen previews on this Mac. Normal idle activation, lock/sleep an
 long-session behaviour remain unverified. This release changes only the Mac
 host; the existing Windows package remains at 0.1.8.
 
+## Memory profile on 17 November 2026
+
+This profile used the normal installed 0.1.9 (12) build on the M1 Mac. The user
+ran a Settings full-screen preview while native `footprint`, full `vmmap` and
+`heap --noContent` snapshots were captured. Measurements below use MiB
+(1,048,576 bytes). The new host peaked at 471.02 MiB; active snapshots ranged
+from 328.92 to 456.42 MiB. The earlier 650.9 MiB peak had no simultaneous full
+category snapshot. The following table accounts for the fresh 456.42 MiB
+snapshot, rather than assigning invented categories to that older peak.
+
+| Charged category | MiB | Evidence |
+| --- | ---: | --- |
+| Display IOSurfaces | 150.312 | Six Retina and three HD CAMetalLayer drawables, plus one compositor surface |
+| Owned physical footprint, unmapped | 250.125 | Kernel-owned charge; exact internal resource names unavailable |
+| Tagged graphics allocations | 20.203 | IOAccelerator and separately tagged unmapped graphics memory |
+| Core Animation and Core Graphics | 18.938 | Window/composition allocations |
+| Heap and allocator metadata | 11.734 | All ordinary allocated objects/arrays and allocator pages |
+| Other runtime, stacks and page tables | 5.112 | Remaining charged categories |
+| **Total** | **456.424** | Sum of native footprint categories |
+
+These categories sum exactly in bytes before rounding. Resident size, virtual
+address reservations and `MTLDevice.currentAllocatedSize` are separate views of
+allocations and must not be added to this total. The separately reported
+compressed/swapped values are already included in the footprint tool's charged
+category totals. The interpretation follows Apple's
+[Metal memory analysis guide](https://developer.apple.com/documentation/xcode/analyzing-the-memory-usage-of-your-metal-app).
+
+The full VM map identified the display surfaces precisely: six 2880x1800 Metal
+drawables at 20.125 MiB each, three 1920x1080 drawables at 8.094 MiB each, and a
+5.281 MiB Core Animation surface. This is two Retina-sized renderer pools plus
+one HD-sized pool for the two physical displays. The user-confirmed post-exit
+snapshot still contained one MTKView/CAMetalLayer/MacSource, used 153.64 MiB,
+and later consumed 4.4% CPU. Settings was on General. The administrator ownership
+scan measured 152.31 MiB and still left 47.50 MiB in the unnamed unmapped
+category. It did not reveal resource-level names. This is a remaining inactive
+view path; the earlier two-cycle success did not establish all host paths.
+Its preview/session state and creation sequence were not captured in this run,
+so neither an unguarded preview nor an unarmed late-created view is established
+as the cause.
+
+The cached model used for independent accounting had 5,894 atoms, 10,929 bonds
+and one snapshot. Topology arrays requested 181,736 bytes and coordinates
+70,728 bytes. Active latest-mode source/display data plus a space-filling CPU
+scene requested 976,688 bytes per view, or 2.79 MiB for three views. Bond styles
+requested 1,851,008 bytes per view. These are part of the heap total, not extra
+memory to add. Cache serialization peaked at 5,902,704 requested C++ bytes for
+this fixture and released its temporary allocations. Latest mode did not retain
+a trajectory history. Explicit instance buffers and static meshes were small;
+the M1 depth attachment was memoryless and reported no allocated backing bytes.
+
+A separate native arm64 probe linked the unchanged renderer and used three
+IOSurface-backed colour targets per renderer. It drained an autorelease pool
+for each draw and bounded concurrent commands to three per renderer. The
+offscreen pools approximate CAMetalLayer storage; the actual host surface
+sizes above remain authoritative.
+
+| Controlled case | One pending command per renderer | Up to three pending commands | Explicit Metal resources |
+| --- | ---: | ---: | ---: |
+| One Retina renderer, all styles | 125.47 MiB | 168.50 MiB | 61.34 MiB |
+| Two Retina plus one HD, all styles | 301.60 MiB | 425.97 MiB | 147.05 MiB |
+| Two Retina plus one HD, space-filling only | 285.77 MiB | 431.17 MiB | 144.52 MiB |
+| Four Retina renderers, all styles | 459.30 MiB | 643.02 MiB | 243.27 MiB |
+
+Changing concurrency left explicit Metal resource sizes unchanged. It added
+124.38 MiB in the three-renderer all-style comparison and 145.41 MiB in the
+space-filling comparison, with only about 1 MiB of additional malloc use. The
+background-only three-renderer comparison added 34.80 MiB. This links a large
+part of the changing footprint to command/draw-dependent graphics working
+memory beyond explicit model buffers. It does not identify every internal
+kernel allocation in the live host's unnamed category.
+
+Release timing matters. In the three-renderer concurrent case, releasing colour
+targets/model data and waiting two seconds reduced footprint from 425.97 to
+27.96 MiB while queues and pipelines remained alive. Releasing queues and
+waiting another second reduced it to 19.97 MiB. Most release occurred before
+queue destruction. Earlier scratch results with a batch-wide autorelease pool
+were excluded because they retained command buffers differently from production.
+
+Per-allocation tracing of the protected system host failed under System Integrity
+Protection. Protections were retained. Failed/incomplete Instruments traces were
+excluded. Raw VM/heap/footprint reports, the native probe and allocation-accounting
+helpers remain private under `/private/tmp`; only aggregate results are recorded
+here. These findings prioritise the remaining inactive/extra renderer and GPU
+frame concurrency. Changing drawable buffering needs a 60 fps presentation test.
+Profiling made no production code or installation changes.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a
