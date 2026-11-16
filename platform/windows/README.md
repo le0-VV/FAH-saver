@@ -62,8 +62,9 @@ Selecting loop playback exposes the snapshot interval field; changing to latest
 leaves the saved interval intact. The field accepts digits and one decimal point
 only. Invalid typing or paste operations are rejected in full. Empty text and a
 lone decimal point remain possible while editing; Save requires a finite value
-of at least 0.05 seconds. Validation errors appear inline and focus the relevant
-field, rather than opening a warning dialog. Large saved values appear as plain
+of at least 0.05 seconds. Validation errors appear directly below the relevant
+field and move later rows down to make space. The field receives focus, rather
+than opening a warning dialog. Large saved values appear as plain
 decimal text. Background choices are light sky/grid, dark
 sky/grid and a custom solid colour. The corresponding CLI values are `sky`,
 `dark` and `solid`. Existing `sky` and `solid` settings keep their previous

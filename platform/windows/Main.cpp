@@ -85,7 +85,38 @@ Options preferences() {
 
 enum Control { sourceControl=100,unitControl,fpsControl,styleControl,playbackControl,
     backgroundControl,colourControl,snapshotIntervalControl,snapshotIntervalLabel,snapshotIntervalUnits,validationControl };
-struct Configuration { Options options; std::string error; };
+struct ControlPosition { HWND window; POINT origin; };
+struct Configuration {
+    Options options;
+    std::vector<ControlPosition> positions;
+    SIZE windowSize{};
+    bool showingValidation = false;
+};
+void validationMessage(HWND dialog,Configuration& state,int identifier,const wchar_t* text) {
+    if (state.positions.empty()) return;
+    if (state.showingValidation) {
+        for (const auto& item : state.positions)
+            SetWindowPos(item.window,nullptr,item.origin.x,item.origin.y,0,0,SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        SetWindowPos(dialog,nullptr,0,0,state.windowSize.cx,state.windowSize.cy,SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        state.showingValidation = false;
+    }
+    if (!*text) { ShowWindow(GetDlgItem(dialog,validationControl),SW_HIDE); return; }
+    RECT field{};
+    if (!GetWindowRect(GetDlgItem(dialog,identifier ? identifier : sourceControl),&field)) {
+        OutputDebugStringA("FAHSaver options: cannot locate validation field.\n");
+        return;
+    }
+    MapWindowPoints(nullptr,dialog,reinterpret_cast<POINT*>(&field),2);
+    const LONG below = field.top + 24;
+    for (const auto& item : state.positions)
+        if (item.origin.y >= below)
+            SetWindowPos(item.window,nullptr,item.origin.x,item.origin.y+24,0,0,SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(dialog,nullptr,0,0,state.windowSize.cx,state.windowSize.cy+24,SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(GetDlgItem(dialog,validationControl),nullptr,field.left,below+2,370,18,SWP_NOZORDER | SWP_NOACTIVATE);
+    SetDlgItemTextW(dialog,validationControl,text);
+    ShowWindow(GetDlgItem(dialog,validationControl),SW_SHOW);
+    state.showingValidation = true;
+}
 std::wstring editText(HWND control) {
     const int length = GetWindowTextLengthW(control);
     std::wstring text(std::size_t(length)+1,L'\0');
@@ -128,7 +159,9 @@ LRESULT CALLBACK decimalEditProcedure(HWND edit,UINT message,WPARAM wparam,LPARA
             return 0;
         }
     } catch (const std::exception&) {
-        SetDlgItemTextW(GetParent(edit),validationControl,L"Cannot validate the interval text.");
+        HWND dialog = GetParent(edit);
+        auto* state = reinterpret_cast<Configuration*>(GetWindowLongPtrW(dialog,DWLP_USER));
+        if (state) validationMessage(dialog,*state,snapshotIntervalControl,L"Cannot validate the interval text.");
         return 0;
     }
     if (message == WM_NCDESTROY) RemoveWindowSubclass(edit,decimalEditProcedure,identifier);
@@ -175,10 +208,21 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
             label(L"Background",234); combo(dialog,backgroundControl,234,{L"Light sky and grid",L"Dark sky and grid",L"Solid colour"},options.sky ? (options.darkSky ? 1 : 0) : 2);
             label(L"Solid colour (RGB)",270); control(dialog,L"EDIT",wide(hexColour(options)).c_str(),colourControl,170,270,120,24,WS_TABSTOP | ES_AUTOHSCROLL);
             control(dialog,L"STATIC",L"Use six hexadecimal digits, for example 101820.",0,170,300,370,24,0);
-            control(dialog,L"STATIC",L"",validationControl,16,326,524,24,0);
+            HWND validation = control(dialog,L"STATIC",L"",validationControl,170,44,370,18,0);
+            ShowWindow(validation,SW_HIDE);
             control(dialog,L"STATIC",wide("Version " FAH_SAVER_VERSION).c_str(),0,16,360,300,24,0);
             control(dialog,L"BUTTON",L"Save",IDOK,364,354,82,28,WS_TABSTOP | BS_DEFPUSHBUTTON);
             control(dialog,L"BUTTON",L"Cancel",IDCANCEL,458,354,82,28,WS_TABSTOP | BS_PUSHBUTTON);
+            RECT bounds{};
+            if (!GetWindowRect(dialog,&bounds)) throw std::runtime_error("Cannot read the options window size");
+            state->windowSize = {bounds.right-bounds.left,bounds.bottom-bounds.top};
+            for (HWND child = GetWindow(dialog,GW_CHILD); child; child = GetWindow(child,GW_HWNDNEXT)) {
+                if (child == validation) continue;
+                RECT position{};
+                if (!GetWindowRect(child,&position)) throw std::runtime_error("Cannot read an options control position");
+                POINT origin{position.left,position.top}; MapWindowPoints(nullptr,dialog,&origin,1);
+                state->positions.push_back({child,origin});
+            }
             return TRUE;
         }
         if (message == WM_CTLCOLORSTATIC && GetDlgCtrlID(reinterpret_cast<HWND>(lparam)) == validationControl) {
@@ -187,7 +231,7 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
             return reinterpret_cast<INT_PTR>(GetSysColorBrush(COLOR_3DFACE));
         }
         if (message == WM_COMMAND && (HIWORD(wparam) == EN_CHANGE || HIWORD(wparam) == CBN_SELCHANGE))
-            SetDlgItemTextW(dialog,validationControl,L"");
+            if (state) validationMessage(dialog,*state,0,L"");
         if (message == WM_COMMAND && LOWORD(wparam) == playbackControl && HIWORD(wparam) == CBN_SELCHANGE) {
             updateSnapshotIntervalControls(dialog); return TRUE;
         }
@@ -241,7 +285,7 @@ INT_PTR CALLBACK configure(HWND dialog,UINT message,WPARAM wparam,LPARAM lparam)
         if (message == WM_COMMAND && LOWORD(wparam) == IDCANCEL) { EndDialog(dialog,IDCANCEL); return TRUE; }
     } catch (const std::exception& error) {
         if (message == WM_COMMAND && LOWORD(wparam) == IDOK) {
-            SetDlgItemTextW(dialog,validationControl,wide(error.what()).c_str());
+            validationMessage(dialog,*state,invalidControl,wide(error.what()).c_str());
             if (invalidControl) {
                 HWND field = GetDlgItem(dialog,invalidControl); SetFocus(field);
                 wchar_t type[16]{};
