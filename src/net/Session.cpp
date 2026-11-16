@@ -30,7 +30,8 @@ std::int64_t integer(const Json& value) {
     return value.get<std::int64_t>();
 }
 
-std::size_t publishedFrames(const Json& value) {
+std::optional<std::size_t> publishedFrames(const Json& value) {
+    if (value.is_null()) return std::nullopt;
     if (!value.is_number_integer() ||
         (!value.is_number_unsigned() && value.get<std::int64_t>() < 0) ||
         value.get<std::uint64_t>() > maxFrames)

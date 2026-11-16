@@ -91,7 +91,7 @@ void latestOnlyChecks() {
     check(indices(events) == std::vector<std::size_t>({0,1}),"WU switch did not deliver its own tail");
 
     // The watermark is mandatory in latest mode; never silently fall back to replay.
-    for (const Json& value : {unit("missing"), countedUnit("missing",0)}) {
+    for (const Json& value : {unit("missing"), countedUnit("missing",nullptr), countedUnit("missing",0)}) {
         fah::SourceSession missing(options,[](fah::SourceEvent) {});
         missing.connected(); missing.receive(Json{{"units",{value}}}.dump());
         missing.receive(Json{"viz","missing","topology",topology}.dump());
@@ -102,9 +102,32 @@ void latestOnlyChecks() {
     latest.receive(Json{"viz","reconnected","topology",topology}.dump());
     rejects([&] { coordinates(latest,"reconnected",0); });
 
-    for (const Json& count : {Json(nullptr),Json(true),Json("3"),Json(-1),Json(1.5),Json(10001),
+    events.clear(); latest.connected();
+    latest.receive(Json{{"units",{countedUnit("nullable",nullptr)}}}.dump());
+    latest.receive(Json{"viz","nullable","topology",topology}.dump());
+    latest.receive(Json{"units",0,"frames",1}.dump());
+    coordinates(latest,"nullable",0);
+    latest.receive(Json{"units",0,countedUnit("nullable",nullptr)}.dump());
+    latest.receive(Json{"units",0,"frames",2}.dump());
+    coordinates(latest,"nullable",1);
+    latest.receive(Json{"units",0,"frames",nullptr}.dump());
+    latest.receive(Json{"units",0,"frames",3}.dump());
+    coordinates(latest,"nullable",2);
+    check(indices(events) == std::vector<std::size_t>({0,1,2}),
+          "Null frame-count removal could not recover with a new published watermark");
+    for (bool fullReplacement : {false,true}) {
+        fah::SourceSession removed(options,[](fah::SourceEvent) {});
+        removed.connected(); removed.receive(Json{{"units",{countedUnit("removed",2)}}}.dump());
+        removed.receive(Json{"viz","removed","topology",topology}.dump());
+        coordinates(removed,"removed",0);
+        removed.receive((fullReplacement ? Json{"units",0,countedUnit("removed",nullptr)} :
+                         Json{"units",0,"frames",nullptr}).dump());
+        rejects([&] { coordinates(removed,"removed",1); });
+    }
+
+    for (const Json& count : {Json(true),Json("3"),Json(-1),Json(1.5),Json(10001),Json(1e100),
                              Json(std::numeric_limits<std::uint64_t>::max()),
-                             Json(std::numeric_limits<double>::infinity()),Json::array(),Json::object()}) {
+                             Json::array(),Json::object()}) {
         fah::SourceSession bad(options,[](fah::SourceEvent) {});
         bad.connected();
         rejects([&] { bad.receive(Json{{"units",{countedUnit("bad",count)}}}.dump()); });
@@ -112,6 +135,9 @@ void latestOnlyChecks() {
         update.connected(); update.receive(Json{{"units",{countedUnit("bad",1)}}}.dump());
         rejects([&] { update.receive(Json{"units",0,"frames",count}.dump()); });
     }
+    fah::SourceSession nonfinite(options,[](fah::SourceEvent) {});
+    nonfinite.connected();
+    rejects([&] { nonfinite.receive(R"({"units":[{"id":"bad","state":"RUN","frames":1e999}]})"); });
     fah::SourceSession malformed(options,[](fah::SourceEvent) {});
     malformed.connected(); malformed.receive(Json{{"units",{countedUnit("bad",3)}}}.dump());
     malformed.receive(Json{"viz","bad","topology",topology}.dump());
