@@ -84,7 +84,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     std::shared_ptr<const fah::Capture> _capture;
     FAHRenderOptions _options;
     fah::Scene _scene;
-    bool _dirty, _running;
+    bool _dirty, _running, _memorylessDepth;
     std::size_t _frame, _styleStep;
     fah::Style _style;
     double _firstTime;
@@ -97,6 +97,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     self = [super init];
     if (!self) return nil;
     _device = device;
+    _memorylessDepth = [device supportsFamily:MTLGPUFamilyApple1];
     _firstTime = -1;
     _styleStep = std::numeric_limits<std::size_t>::max();
     _style = fah::Style::SpaceFilling;
@@ -258,7 +259,8 @@ static NSDictionary *summary(const std::vector<double>& values) {
     if (!_depth || _depth.width != texture.width || _depth.height != texture.height) {
         MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
             MTLPixelFormatDepth32Float width:texture.width height:texture.height mipmapped:NO];
-        descriptor.storageMode = MTLStorageModePrivate;
+        // Depth is cleared and discarded within this pass; Apple GPUs can keep it tile-local.
+        descriptor.storageMode = _memorylessDepth ? MTLStorageModeMemoryless : MTLStorageModePrivate;
         descriptor.usage = MTLTextureUsageRenderTarget;
         _depth = [_device newTextureWithDescriptor:descriptor];
         if (!_depth) { @synchronized(self) { _lastError = @"Could not allocate the depth texture."; } return nil; }
@@ -359,6 +361,8 @@ static NSDictionary *summary(const std::vector<double>& values) {
         for (std::size_t i=1; i<times.size(); ++i) intervals.push_back((times[i]-times[i-1])*1000);
         double fps = times.size()>1 && times.back()>times.front() ? (times.size()-1)/(times.back()-times.front()) : 0;
         return @{ @"renderer": @"Metal", @"gpu": _device.name ? _device.name : @"unavailable",
+            @"depth_storage_policy": _memorylessDepth ? @"memoryless" : @"private",
+            @"metal_current_allocated_bytes": @(_device.currentAllocatedSize),
             @"measurement": times.empty() ? @"offscreen submissions; no presentation measurement" : @"drawable presentation timestamps",
             @"requested_fps": @(_options.fps), @"submitted_frames": @(_submitted),
             @"completed_frames": @(_completed), @"gpu_errors": @(_gpuErrors),

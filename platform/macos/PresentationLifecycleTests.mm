@@ -136,7 +136,10 @@ int main(int argc, const char *argv[]) {
             check(view.isAnimating && view.hasActiveSource,"Reattachment to a hidden parent lost its later resume");
             [view stopAnimation]; expectStopped(view);
             check(!window.isVisible,"Presentation test ordered a window on screen");
-            [window close]; counters->beforeStart = {};
+            [view startAnimation];
+            [window close]; expectStopped(view);
+            [view startAnimation]; [view stopAnimation]; expectStopped(view);
+            counters->beforeStart = {};
             std::puts("Presentation lifecycle passed: initial windowless start, 20 retained-view hide/detach/resume cycles, released Metal owners, stopped callbacks and explicit-stop precedence");
             return 0;
         } catch (const std::exception& exception) {

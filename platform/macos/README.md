@@ -58,6 +58,12 @@ Drawable width and height refer to physical pixels. The defaults are 1024×768.
 Metal uses one sample per pixel, opaque shading and back-face culling. Geometry is
 instanced and uploaded once. Instance data changes only on snapshot or style
 updates. Per-display-frame work updates camera uniforms and submits draw calls.
+Apple-family GPUs use memoryless D32 depth: the pass clears and discards depth,
+so no full-resolution depth contents must survive the pass. Other GPUs use
+private D32 depth. Colour resolution and depth precision are unchanged.
+Aggregate metrics report `depth_storage_policy` and the device's
+`metal_current_allocated_bytes`; this device-wide value must not be summed across
+renderer instances and is not a complete process-footprint measurement.
 
 ## Screensaver options and checks
 
@@ -93,7 +99,11 @@ in-memory model. Renderer/configuration errors still appear over the view.
 Connecting and retry messages are hidden while a valid model is available.
 
 Actual hiding (including a hidden ancestor) or removal from an existing
-superview suspends the saver even if the host omits `stopAnimation`. Suspension
+superview suspends the saver even if the host omits `stopAnimation`. A public
+`NSWindowWillCloseNotification` for the view's actual window performs an explicit
+stop; closing a retained window need not hide or detach its content views. The
+observer changes with the window and does not gate initial windowless hosting.
+Suspension
 stops its timer/source/cache worker, retains only the latest model and releases
 the MTKView/CAMetalLayer presentation owner. Showing or reattaching a previously
 running view recreates that owner once and resumes from the cached model. An
@@ -101,7 +111,7 @@ explicit stop cancels automatic resume. Initial windowless hosting remains
 supported; neither a missing window nor window occlusion is used as a stop test.
 The presentation regression retains the saver across 20 hide/detach/resume
 cycles and checks released weak view/layer references, stopped callbacks and
-deferred hidden starts. These public lifecycle checks do not establish that
+deferred hidden starts, plus retained-view window closure. These public lifecycle checks do not establish that
 every macOS host retention path emits the required hide/removal events.
 The programmatic options window disables AppKit's automatic release-on-close;
 ARC owns its lifetime. The lifecycle test uses transparent, non-interactive

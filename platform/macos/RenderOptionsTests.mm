@@ -27,6 +27,8 @@ int main(int argc, const char *argv[]) {
             id<MTLTexture> texture = [device newTextureWithDescriptor:descriptor];
             check(texture != nil, "Could not allocate the test texture");
             [renderer setCapture:capture];
+            check([[[renderer metrics] objectForKey:@"depth_storage_policy"] isEqualToString:
+                [device supportsFamily:MTLGPUFamilyApple1] ? @"memoryless" : @"private"],"Unexpected depth storage capability policy");
             auto draw = [&](double time) {
                 id<MTLCommandBuffer> command = [renderer renderToTexture:texture time:time drawable:nil];
                 check(command != nil, "Renderer did not submit the test draw");

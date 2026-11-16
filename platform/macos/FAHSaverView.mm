@@ -113,6 +113,8 @@ static void cacheError(const std::string& message) {
     NSString *_connectionStatus, *_configurationError;
     BOOL _resumeWhenPresented, _detachedFromSuperview;
     CGSize _lastDrawableSize;
+    __weak NSWindow *_observedWindow;
+    id _windowCloseObserver;
     NSUInteger _sourceGeneration, _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_playback, *_style, *_background;
@@ -384,7 +386,22 @@ static void cacheError(const std::string& message) {
     }
 }
 
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    NSWindow *window = self.window;
+    if (window == _observedWindow && (window || !_windowCloseObserver)) return;
+    if (_windowCloseObserver) [NSNotificationCenter.defaultCenter removeObserver:_windowCloseObserver];
+    _windowCloseObserver = nil;
+    _observedWindow = window;
+    if (window) {
+        __weak FAHSaverView *weakSelf = self;
+        _windowCloseObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowWillCloseNotification
+            object:window queue:nil usingBlock:^(NSNotification *note) { [weakSelf stopAnimation]; }];
+    }
+}
+
 - (void)dealloc {
+    if (_windowCloseObserver) [NSNotificationCenter.defaultCenter removeObserver:_windowCloseObserver];
     ++_sourceGeneration;
     if (_source) _source->stop();
     [_renderer stop];
