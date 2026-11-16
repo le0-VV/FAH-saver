@@ -194,9 +194,12 @@ struct App {
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<fah::Source> source;
     bool fullscreen = false,preview = false,redraw = true,failed = false;
+    bool benchmark = false;
     std::atomic<bool> deliveryFailed{false};
     POINT initialMouse{};
     std::uint64_t revision = 0,lastRevision = UINT64_MAX,frameCount = 0,gpuCount = 0;
+    std::uint64_t pumpIterations = 0,messagesDispatched = 0,renderCalls = 0,timerWakes = 0,inputQueueWakes = 0;
+    PhaseTiming sceneBuildUpload,fenceQueryWait,acquire,recordSubmit,present;
     std::size_t retainedBytes = 0;
     unsigned drawableWidth = 0,drawableHeight = 0;
     std::size_t lastFrame = SIZE_MAX;
@@ -205,6 +208,7 @@ struct App {
     std::mt19937 random{std::random_device{}()};
     Clock::time_point started = Clock::now();
     double cpuStarted = 0,cpuDrawTotal = 0,gpuTotal = 0,cpuDrawMaximum = 0;
+    double threadCpuStarted = 0;
     std::string failure;
     std::string adapterName;
 
@@ -213,7 +217,8 @@ struct App {
     }
     void start() {
         GetCursorPos(&initialMouse);
-        renderer = std::make_unique<Renderer>(window);
+        benchmark = !options.metrics.empty();
+        renderer = std::make_unique<Renderer>(window,benchmark);
         adapterName = renderer->adapter();
         if (!options.capture.empty()) { capture = fah::readCapture(options.capture); ++revision; message(""); }
         else if (!options.source.empty()) {
@@ -225,7 +230,8 @@ struct App {
             });
             message("Connecting to FAH…"); source->start();
         } else message("Set a live source URL or capture file in Screen Saver Settings → Settings.");
-        started = Clock::now(); cpuStarted = processSeconds();
+        started = Clock::now();
+        if (benchmark) { cpuStarted = processSeconds(); threadCpuStarted = threadCpuMilliseconds(); }
     }
     void stop() {
         if (source) { source->stop(); source.reset(); }
@@ -253,6 +259,7 @@ struct App {
         }
     }
     void render() {
+        if (benchmark) ++renderCalls;
         if (deliveryFailed) throw std::runtime_error("Cannot queue FAH updates for the screensaver window");
         const double elapsed = std::chrono::duration<double>(Clock::now()-started).count();
         if (options.seconds > 0 && elapsed >= options.seconds) { PostMessageW(window,WM_CLOSE,0,0); return; }
@@ -267,13 +274,19 @@ struct App {
                 style = randomStyle;
             }
             if (lastRevision != revision || lastFrame != frame || lastStyle != style) {
+                PhaseTimer sceneTimer(benchmark);
                 renderer->setScene(fah::makeScene(capture.topology,capture.frames[frame],static_cast<fah::Style>(style)));
+                if (benchmark) addPhase(sceneBuildUpload,sceneTimer.finish());
                 lastRevision = revision; lastFrame = frame; lastStyle = style;
             }
         } else if (!redraw) return;
         const auto timing = renderer->draw(float(elapsed*.2),options.sky,options.colour);
         redraw = false;
-        if (timing.rendered) {
+        if (benchmark) {
+            addPhase(fenceQueryWait,timing.fenceQueryWait); addPhase(acquire,timing.acquire);
+            addPhase(recordSubmit,timing.recordSubmit); addPhase(present,timing.present);
+        }
+        if (benchmark && timing.rendered) {
             ++frameCount; cpuDrawTotal += timing.cpuMilliseconds;
             cpuDrawMaximum = std::max(cpuDrawMaximum,timing.cpuMilliseconds);
             if (timing.gpuMilliseconds >= 0) { ++gpuCount; gpuTotal += timing.gpuMilliseconds; }
@@ -297,7 +310,22 @@ struct App {
         if (gpuCount) output << gpuTotal/gpuCount; else output << "null";
         output << ",\n  \"peak_working_set_bytes\":" << memory.PeakWorkingSetSize
             << ",\n  \"drawable_width\":" << drawableWidth << ",\n  \"drawable_height\":" << drawableHeight
-            << ",\n  \"presented_frame_timestamps\":null,\n  \"power_watts\":null\n}\n";
+            << ",\n  \"diagnostics\":{\n    \"main_thread_cpu_seconds\":" << (threadCpuMilliseconds()-threadCpuStarted)/1000
+            << ",\n    \"pump_iterations\":" << pumpIterations << ",\n    \"messages_dispatched\":" << messagesDispatched
+            << ",\n    \"render_calls\":" << renderCalls << ",\n    \"timer_wakes\":" << timerWakes
+            << ",\n    \"input_queue_wakes\":" << inputQueueWakes << ",\n    \"phase_totals\":{";
+        const std::pair<const char*,const PhaseTiming*> phases[]{
+            {"scene_build_upload",&sceneBuildUpload},{"fence_query_wait",&fenceQueryWait},
+            {"acquire",&acquire},{"record_submit",&recordSubmit},{"present",&present}};
+        bool separator = false;
+        for (const auto& entry : phases) {
+            if (separator) output << ','; separator = true;
+            output << "\n      \"" << entry.first << "\":{\"calls\":" << entry.second->calls
+                << ",\"wall_ms\":" << entry.second->wallMilliseconds
+                << ",\"main_thread_cpu_ms\":" << entry.second->threadCpuMilliseconds << '}';
+        }
+        output << "\n    },\n    \"scope\":\"Aggregates only; scene phase includes its upload fence wait; input queue includes all GUI messages; diagnostic sampling overhead is included\"\n  },"
+            << "\n  \"presented_frame_timestamps\":null,\n  \"power_watts\":null\n}\n";
         output.close();
         if (!output) throw std::runtime_error("Cannot write metrics output file");
     }
@@ -442,9 +470,11 @@ int run(const std::vector<std::wstring>& arguments) {
         bool running = true;
         auto next = Clock::now();
         while (running) {
+            if (app.benchmark) ++app.pumpIterations;
             MSG message;
             while (PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {
                 if (message.message == WM_QUIT) { running = false; break; }
+                if (app.benchmark) ++app.messagesDispatched;
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
             if (!running) break;
@@ -459,6 +489,8 @@ int run(const std::vector<std::wstring>& arguments) {
             if (!SetWaitableTimerEx(timer,&due,0,nullptr,nullptr,nullptr,0)) throw std::runtime_error("Cannot schedule frame timer");
             const DWORD wait = MsgWaitForMultipleObjectsEx(1,&timer,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
             if (wait == WAIT_FAILED) throw std::runtime_error("Cannot wait for frames or window events");
+            if (app.benchmark && wait == WAIT_OBJECT_0) ++app.timerWakes;
+            if (app.benchmark && wait == WAIT_OBJECT_0+1) ++app.inputQueueWakes;
         }
         app.stop(); app.metrics();
         if (app.failed) throw std::runtime_error(app.failure);

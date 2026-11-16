@@ -69,6 +69,7 @@ struct Renderer::Impl {
     VkFence fence = VK_NULL_HANDLE;
     VkQueryPool queries = VK_NULL_HANDLE;
     bool queryWritten = false;
+    bool diagnostics = false;
     std::uint32_t timestampBits = 0;
     float timestampPeriod = 0;
     std::string adapterName;
@@ -130,8 +131,9 @@ struct Renderer::Impl {
         vkUnmapMemory(device, destination.memory);
     }
 
-    void initialise(HWND target) {
+    void initialise(HWND target,bool measure) {
         window = target;
+        diagnostics = measure;
         VkApplicationInfo application{}; application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
         application.pApplicationName = "FAH Saver"; application.apiVersion = VK_API_VERSION_1_0;
         const char* instanceExtensions[]{VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
@@ -198,7 +200,7 @@ struct Renderer::Impl {
         VkPipelineLayoutCreateInfo layoutInfo{}; layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layoutInfo.pushConstantRangeCount = 1; layoutInfo.pPushConstantRanges = &range;
         require(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout), "Create pipeline layout");
-        if (timestampBits) {
+        if (diagnostics && timestampBits) {
             VkQueryPoolCreateInfo queryInfo{}; queryInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
             queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP; queryInfo.queryCount = 2;
             require(vkCreateQueryPool(device, &queryInfo, nullptr, &queries), "Create timestamp queries");
@@ -396,6 +398,7 @@ struct Renderer::Impl {
         RECT rectangle; GetClientRect(window,&rectangle);
         if (rectangle.right <= 0 || rectangle.bottom <= 0) return {};
         if (!swapchain) createSwapchain();
+        PhaseTimer fenceTimer(diagnostics);
         require(vkWaitForFences(device,1,&fence,VK_TRUE,UINT64_MAX), "Wait for previous frame");
         DrawTiming timing;
         if (queries && queryWritten) {
@@ -404,11 +407,14 @@ struct Renderer::Impl {
             const std::uint64_t mask = timestampBits >= 64 ? UINT64_MAX : (std::uint64_t(1) << timestampBits) - 1;
             timing.gpuMilliseconds = double((ticks[1] - ticks[0]) & mask) * timestampPeriod / 1e6;
         }
+        timing.fenceQueryWait = fenceTimer.finish();
+        PhaseTimer acquireTimer(diagnostics);
         std::uint32_t image = 0;
         const auto acquire = vkAcquireNextImageKHR(device,swapchain,UINT64_MAX,acquired,VK_NULL_HANDLE,&image);
-        if (acquire == VK_ERROR_OUT_OF_DATE_KHR) { resize(); return {}; }
+        timing.acquire = acquireTimer.finish();
+        if (acquire == VK_ERROR_OUT_OF_DATE_KHR) { resize(); return timing; }
         if (acquire != VK_SUBOPTIMAL_KHR) require(acquire, "Acquire image");
-        const auto start = std::chrono::steady_clock::now();
+        PhaseTimer recordTimer(diagnostics);
         require(vkResetCommandBuffer(command,0), "Reset command buffer");
         VkCommandBufferBeginInfo begin{}; begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         require(vkBeginCommandBuffer(command,&begin), "Begin command buffer");
@@ -437,19 +443,22 @@ struct Renderer::Impl {
         require(vkResetFences(device,1,&fence), "Reset submission fence");
         require(vkQueueSubmit(queue,1,&submit,fence), "Submit frame");
         queryWritten = bool(queries);
+        timing.recordSubmit = recordTimer.finish();
+        PhaseTimer presentTimer(diagnostics);
         VkPresentInfoKHR present{}; present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         present.waitSemaphoreCount = 1; present.pWaitSemaphores = &finished[image];
         present.swapchainCount = 1; present.pSwapchains = &swapchain; present.pImageIndices = &image;
         const auto result = vkQueuePresentKHR(queue,&present);
         if (result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR) require(result, "Present frame");
-        timing.cpuMilliseconds = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+        timing.present = presentTimer.finish();
+        timing.cpuMilliseconds = timing.recordSubmit.wallMilliseconds+timing.present.wallMilliseconds;
         timing.rendered = true;
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR) resize();
         return timing;
     }
 };
 
-Renderer::Renderer(HWND window) : impl(std::make_unique<Impl>()) { impl->initialise(window); }
+Renderer::Renderer(HWND window,bool diagnostics) : impl(std::make_unique<Impl>()) { impl->initialise(window,diagnostics); }
 Renderer::~Renderer() = default;
 void Renderer::setScene(const fah::Scene& scene) {
     require(vkWaitForFences(impl->device,1,&impl->fence,VK_TRUE,UINT64_MAX), "Wait before scene update");

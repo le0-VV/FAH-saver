@@ -67,6 +67,28 @@ GPU memory and power are unmeasured. The renderer uses FIFO presentation and
 one in-flight frame. Record adapter and actual display configuration alongside
 each comparison result.
 
+`--metrics` also enables aggregate CPU diagnostics. The result separates the
+UI/main thread's CPU time from whole-process CPU time. It counts pump iterations,
+dispatched messages, render calls and timer/input-queue wakes. The input queue
+includes GUI and posted messages, not only physical keyboard or mouse input.
+Phase totals record wall time and main-thread CPU time for scene build/upload,
+draw fence/query wait, image acquisition, command recording/submission and
+presentation. The scene phase includes its upload fence wait and temporary-data
+cleanup. Sampling overhead is included; there is no per-frame logging. CPU time
+uses `GetThreadTimes`, whose reported units do not guarantee scheduling precision.
+These diagnostics and Vulkan timestamp queries are disabled without `--metrics`.
+
+Validate a completed capture trial with:
+
+```powershell
+python platform\windows\tests\check_diagnostics.py C:\private\vulkan.json
+```
+
+Exported Zig-built native bundles must include the nlohmann JSON MIT licence and
+the static-runtime notices for libc++, libc++abi, libunwind and the bundled
+MinGW runtime. Those toolchain-specific notices accompany the binary bundle;
+they are not additional application dependencies.
+
 Local checks compile the four GLSL shaders to SPIR-V, validate their output and
 run portable option and projection/winding tests. The complete host, core and
 WinHTTP source also cross-compile through CMake/Ninja to an x64 Windows GUI
