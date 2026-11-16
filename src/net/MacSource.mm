@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <CFNetwork/CFNetwork.h>
 #include "fah/Source.hpp"
 #include <algorithm>
 #include <atomic>
@@ -65,6 +66,39 @@ struct MacState : std::enable_shared_from_this<MacState> {
         }
     }
 
+    std::string connectionFailure(NSError* error, const char* operation) {
+        NSHTTPURLResponse* response = [socket.response isKindOfClass:[NSHTTPURLResponse class]] ?
+            (NSHTTPURLResponse*)socket.response : nil;
+        const NSInteger status = response ? response.statusCode : 0;
+        NSError* urlError = error;
+        for (unsigned i = 0; i < 4 && urlError && ![urlError.domain isEqualToString:NSURLErrorDomain]; ++i) {
+            id underlying = urlError.userInfo[NSUnderlyingErrorKey];
+            urlError = [underlying isKindOfClass:[NSError class]] ? underlying : nil;
+        }
+        const bool handshake = !opened && status != 101;
+        std::string message = handshake ? "FAH WebSocket handshake failed" : operation;
+        message += " (";
+        if (status) message += "HTTP " + std::to_string(status) + "; ";
+        message += urlError ? "URL error " + std::to_string(urlError.code) :
+                              "network error " + std::to_string(error.code);
+        message += "). ";
+        if (status == 401 || status == 403)
+            message += "The endpoint or an intermediary denied access; check FAH access rules and proxy routing.";
+        else if (status == 407)
+            message += "The proxy requires authentication; check the source's proxy routing.";
+        else if (status == 404)
+            message += "Check that the source URL uses the FAH /api/websocket endpoint.";
+        else if (status == 502 || status == 503 || status == 504)
+            message += "The endpoint or proxy is unavailable; check the FAH listener and proxy routing.";
+        else if (urlError.code == NSURLErrorCannotConnectToHost || urlError.code == NSURLErrorCannotFindHost ||
+                 urlError.code == NSURLErrorDNSLookupFailed)
+            message += "Check the source hostname, port and FAH listener.";
+        else if (handshake)
+            message += "Check the FAH endpoint, access rules and proxy routing.";
+        else message += "Check the source connection.";
+        return message;
+    }
+
     void receive() {
         if (!active || !socket) return;
         std::weak_ptr<MacState> weak = shared_from_this();
@@ -74,7 +108,7 @@ struct MacState : std::enable_shared_from_this<MacState> {
                 auto self = weak.lock();
                 if (!self || !self->active || self->generation != version) return;
                 if (error) {
-                    self->fail("FAH connection failed (URL error " + std::to_string(error.code) + ")", self->retryable(error));
+                    self->fail(self->connectionFailure(error, "FAH WebSocket connection failed"), self->retryable(error));
                     return;
                 }
                 if (message.type != NSURLSessionWebSocketMessageTypeString) {
@@ -99,7 +133,7 @@ struct MacState : std::enable_shared_from_this<MacState> {
                             dispatch_async(dispatch_get_main_queue(), ^{
                                 if (auto locked = weak.lock())
                                     if (locked->active && locked->generation == version)
-                                        locked->fail("Could not request FAH visualisation", locked->retryable(sendError));
+                                        locked->fail(locked->connectionFailure(sendError, "Could not request FAH visualisation"), locked->retryable(sendError));
                             });
                         }];
                     }
@@ -120,6 +154,14 @@ struct MacState : std::enable_shared_from_this<MacState> {
         configuration.timeoutIntervalForResource = 0;
         configuration.HTTPShouldSetCookies = NO;
         configuration.URLCache = nil;
+        // This session connects directly to the configured private LAN/VPN source.
+        configuration.connectionProxyDictionary = @{
+            (__bridge NSString*)kCFNetworkProxiesHTTPEnable: @NO,
+            (__bridge NSString*)kCFNetworkProxiesHTTPSEnable: @NO,
+            (__bridge NSString*)kCFNetworkProxiesSOCKSEnable: @NO,
+            (__bridge NSString*)kCFNetworkProxiesProxyAutoConfigEnable: @NO,
+            (__bridge NSString*)kCFNetworkProxiesProxyAutoDiscoveryEnable: @NO
+        };
         session = [NSURLSession sessionWithConfiguration:configuration];
         socket = [session webSocketTaskWithURL:url];
         socket.maximumMessageSize = 26'000'000;
