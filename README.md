@@ -20,6 +20,7 @@ their limits.
 | Data source limit | Keep FAH's 25 MB visualisation cache limit for now. No companion collector. |
 | Loop playback | Loop all available visualisation snapshots of the selected current WU, with a configurable interval (default 0.5 seconds). |
 | Latest playback | Display the latest snapshot and update when another snapshot arrives. |
+| Startup and offline display | Automatically cache one latest complete model for the selected source; show it while live data is unavailable. |
 | Model styles | The current FAH viewer's three styles: space-filling, ball-and-stick and sticks. |
 | Style selection | Keep one style, cycle through all three, or select styles at random. |
 | Frame rate | Ship with a 60 fps target and a user-configurable frame-rate limit. |
@@ -29,6 +30,17 @@ their limits.
 The display frame rate is separate from the rate at which FAH produces protein
 snapshots. A 60 fps display can rotate the camera smoothly while displaying one
 snapshot. It must not imply that FAH produces 60 new snapshots per second.
+
+The screensaver connects to a live FAH source. It automatically saves the latest
+complete topology and one snapshot locally. That model appears at startup and
+stands in during connection loss, reconnects or a wait for a new WU's first
+snapshot. A complete live snapshot replaces it. The cache does not extend FAH's
+25 MB visualisation history limit. The first successful live connection fills
+the cache; without a valid cache, the saver shows its normal connection status.
+
+There is no manual capture-file selector in the screensaver options. The capture
+and preview command-line tools remain available for development and repeatable
+rendering checks.
 
 ## Rendering candidates
 

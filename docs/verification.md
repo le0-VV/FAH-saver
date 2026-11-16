@@ -152,6 +152,48 @@ for the user. The installed signature and binary hash matched the build. These
 observations establish a corrected ownership fault and recovery of the current
 host session; they do not prove the intermittent host issue cannot recur.
 
+## Version 0.1.6 automatic latest-model cache
+
+Manual Capture file/Browse controls and the source-type selector are removed
+from screensaver Options. Legacy file-only preferences no longer select a
+recording. Developer capture/preview tools remain for repeatable checks.
+
+The shared cache stores one complete topology and one latest snapshot, bound to
+the configured source URL and optional requested WU through a stable identifier.
+The stored record contains no plaintext URL, donor or client state. Writes use
+one coalescing worker and atomic replacement; POSIX files use mode 0600. No
+cache IO runs on display-frame callbacks. Cache errors are logged and live
+reception continues. The first live connection is required when no matching
+valid cache exists.
+
+Both hosts load the cached model before starting the live source. The displayed
+model is separate from pending topology/history: disconnects, reconnects, errors
+and a new WU's topology retain the latest complete snapshot. A matching live
+frame replaces it. Loop history stays session-local; an offline stand-in has one
+snapshot. Connection messages do not cover a valid model. Renderer and invalid
+configuration errors remain visible.
+
+All 13 integrated Mac CTest checks passed, covering atomic persistence, source
+isolation, malformed cache rejection, queued-write coalescing, complete-model
+handover, late-callback rejection, options lifecycle and GPU rendering. The
+updated hidden two-view module host also passed with callback counts unchanged
+after stop and persistent settings unchanged.
+
+The Mac's real sandbox cache was primed from the saved live source: 3,226 atoms,
+6,075 bonds and one snapshot in 295,925 bytes, after receiving 32 live snapshots.
+An isolated host then loaded the actual installed bundle and that real cache
+without a network source. Its model was available before source startup and
+remained available after an injected offline error; the connection label stayed
+hidden in both phases. The installed hash/signature matched the build. System
+Settings showed Version 0.1.6 (7) and no capture-file controls; the user's options
+were not changed. This is model-readiness and small-options verification, not a
+full-screen or sleep/lock test.
+
+The Windows x64 GUI and console test executables cross-built. Initial native
+console runs passed LiveModel and options checks, but the snapshot-cache check
+reported replacement failure, OS error 5. That failure is under investigation;
+the Windows cache update is not yet runtime-verified.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a
