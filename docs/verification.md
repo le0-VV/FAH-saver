@@ -58,6 +58,24 @@ callback counts and has been removed. Production pacing did not need to change.
 All three model styles also passed a fixed-angle culling check: enabling
 back-face culling changed zero pixels in each 1280 × 720 reference image.
 
+The installed arm64 bundle was updated to 0.1.2 after a remote-connection fault.
+FAH now accepts the authorised Mac through scoped LAN and Tailscale listeners,
+access rules and a Windows firewall rule. One graceful client restart preserved
+the same WU, which resumed and advanced with its resource settings unchanged.
+After closing the temporary SSH tunnel, independent native receivers obtained
+two snapshots through each numeric LAN and Tailscale endpoint. The full tailnet
+DNS name also supplied a snapshot. System proxy settings stayed unchanged.
+The seven CTest checks passed. A session-local explicit `DIRECT` PAC policy was
+needed because disabling proxy-enable flags alone did not bypass the system
+proxy for remote numeric WebSockets.
+
+The installed bundle's signature and binary hash matched the build. System
+Settings retained older preview hosts during replacement. Those hosts were
+refreshed, but live system-preview rendering is not confirmed. At the user's
+request, UI testing stopped so they can check the installed saver. Temporary
+file probes were removed from the installed build; the original LAN source and
+other selected options were restored. True off-site operation remains untested.
+
 ## Windows
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a
