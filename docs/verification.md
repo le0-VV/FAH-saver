@@ -313,6 +313,65 @@ host path or longer-session growth is fixed. Options showed the correct version
 and Follow Latest, without changing saved settings. The user retains full-screen
 and longer-session visual acceptance.
 
+## Version 0.1.9 inactive legacy-host rendering
+
+On 17 November, the user reproduced GPU use after leaving a Settings full-screen
+preview. The installed 0.1.8 host used 12.1–13% CPU while inactive, with three
+saver/renderer/Metal-view/layer/source instances and a 561.7 MB footprint.
+Protected thread-state access prevented usable sample stacks. An external
+distributed screensaver-notification observer received no start/stop events
+during this preview.
+
+A temporary, bounded diagnostic build then counted actual Metal command commits
+and completions inside the host. All three non-preview views continued at about
+60 submissions per second for over a minute after exit. Their geometry, hidden
+flags and window visibility stayed unchanged. The public occlusion visible bit
+was unset both during and after the visible preview, so it was unsuitable as a
+visibility gate. No stop, hide, detach, close or relevant occlusion event arrived.
+
+Workspace activation did change from Login Window on entry to another app on
+exit. A first view started about two seconds before Login Window became active,
+and a separate frontmost-app query briefly lagged the exit event. The production
+guard therefore applies only to non-preview views in the legacy host, permits an
+initial cold/windowless start, and uses the activation notification's application
+identity. After observing the active session, it performs a normal explicit stop
+on exit. The dismissal latch blocks stale inactive starts, including after an
+unrequested later session. Only an actual start clears the latch; explicit stop
+cancels pending restarts. The production build has no diagnostic sampler or
+per-frame diagnostic counters.
+
+The public API contract is documented by Apple:
+[workspace activation notification](https://developer.apple.com/documentation/appkit/nsworkspace/didactivateapplicationnotification?language=objc),
+[frontmost application](https://developer.apple.com/documentation/appkit/nsworkspace/frontmostapplication?language=objc).
+Login Window ownership is a compatibility rule verified on this Mac's legacy host,
+rather than a documented guarantee for every screensaver host.
+
+All 16 integrated checks passed, including the new session fixture, existing
+presentation/cache/options checks and offscreen Metal rendering. The session
+fixture checks cold/windowless start, duplicate notifications, stale start
+requests, an unrequested later login cycle, explicit-stop precedence, independent
+display requests and genuine preview isolation.
+
+The user then ran and exited two Settings full-screen previews with the corrected
+guard and temporary counters. Both cycles used the same host process. Six
+non-preview view instances were observed across the cycles; two were later
+deallocated and all four remaining views stopped. Their final submission counts
+stayed fixed for more than 79 seconds after the second exit. Each retained view
+reported no active source, cache worker or Metal presentation view. A separate
+heap inventory also found no MTKView, CAMetalLayer or MacSource instances.
+Repeated post-exit CPU readings were 0.0%, with unchanged CPU time. Physical
+footprint was 63.2 MB after exit versus a 650.9 MB peak in that same process.
+These readings were captured before any host reload.
+
+The normal 0.1.9 (12) module then replaced the diagnostic candidate. Its installed
+binary hash is `57ef6f0ae3657cfd0fdb8363e59d155a85a5e50d5d2954d13125e9e46d84fc12`,
+matching the tested build; the ad hoc signature was verified. Temporary
+instrumentation was absent from the normal binary, and the inactive diagnostic
+host was reloaded only after the measurements. Real-host validation covered
+Settings full-screen previews on this Mac. Normal idle activation, lock/sleep and
+long-session behaviour remain unverified. This release changes only the Mac
+host; the existing Windows package remains at 0.1.8.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a

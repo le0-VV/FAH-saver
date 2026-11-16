@@ -9,6 +9,7 @@ The CMake subdirectory builds these targets:
 - `fah_macos_options_lifecycle_tests`: repeated sheet Save/Cancel/close/reopen checks.
 - `fah_macos_cache_lifecycle_tests`: cached startup and live/offline model handover checks.
 - `fah_macos_presentation_lifecycle_tests`: retained-view hide/detach cleanup and resume checks.
+- `fah_macos_session_lifecycle_tests`: missed host stop, stale restart and multi-display session checks.
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
@@ -117,6 +118,19 @@ The presentation regression retains the saver across 20 hide/detach/resume
 cycles and checks released weak view/layer references, stopped callbacks and
 deferred hidden starts, plus retained-view window closure. These public lifecycle checks do not establish that
 every macOS host retention path emits the required hide/removal events.
+
+The legacy screensaver host can retain full-screen views after dismissal without
+calling stop or changing their visible geometry. Its non-preview views also
+observe workspace application activation. After a view observes Login Window as
+the foreground app during animation, activation of another app performs an
+explicit stop. The notification's application identity is used because a separate
+frontmost-app query can briefly lag behind the event. Later stale start requests
+wait for the next Login Window activation. That activation resumes a view only
+when the host requested a new start; it does not restart all retained views.
+An explicit stop cancels a pending restart. Preview views and other hosts retain
+their normal lifecycle. The guard does not block an initial windowless start or
+use window occlusion as proof that a remote view is visible.
+
 The programmatic options window disables AppKit's automatic release-on-close;
 ARC owns its lifetime. The lifecycle test uses transparent, non-interactive
 windows and an isolated preference domain for ten saves and ten cancels. It
