@@ -39,13 +39,17 @@ vertex Background backgroundVertex(uint index [[vertex_id]]) {
 }
 fragment float4 backgroundFragment(Background in [[stage_in]], constant Uniforms &u [[buffer(0)]]) {
     if (u.parameters.z < .5) return float4(u.background.xyz, 1);
-    float3 colour = mix(float3(.09,.23,.40), float3(.55,.70,.80), in.uv.y);
+    bool dark = u.parameters.z > 1.5;
+    float3 top = dark ? float3(11.,18.,29.)/255. : float3(.09,.23,.40);
+    float3 bottom = dark ? float3(20.,30.,44.)/255. : float3(.55,.70,.80);
+    float3 gridColour = dark ? float3(80.,93.,108.)/255. : float3(.25,.38,.45);
+    float3 colour = mix(top, bottom, in.uv.y);
     if (in.uv.y > .55) {
         float depth = (in.uv.y-.55)/.45;
         float2 p = float2((in.uv.x-.5)*6.,3.)/max(depth,.02);
         float2 grid = abs(fract(p-.5)-.5)/max(fwidth(p),float2(.0001));
         float line = 1.-min(min(grid.x,grid.y),1.);
-        colour = mix(colour,float3(.25,.38,.45),line*depth*.35);
+        colour = mix(colour,gridColour,line*depth*.35);
     }
     return float4(colour, 1);
 }
@@ -157,7 +161,8 @@ static NSDictionary *summary(const std::vector<double>& values) {
 
 - (void)setOptions:(const FAHRenderOptions&)options {
     if (options.fps < 1 || options.fps > 240 || !std::isfinite(options.snapshotInterval) ||
-        options.snapshotInterval <= 0 || !std::isfinite(options.styleInterval) || options.styleInterval <= 0)
+        options.snapshotInterval < .05 || options.snapshotInterval > 60 ||
+        !std::isfinite(options.styleInterval) || options.styleInterval <= 0)
         throw std::runtime_error("Invalid render timing settings");
     const int style = static_cast<int>(options.style);
     if (style < 1 || style > 3) throw std::runtime_error("Model style must be 1, 2 or 3");
@@ -277,7 +282,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
     std::copy(matrix.begin(), matrix.end(), uniforms.matrix);
     uniforms.parameters[0] = std::cos(angle);
     uniforms.parameters[1] = std::sin(angle);
-    uniforms.parameters[2] = _options.sky ? 1 : 0;
+    uniforms.parameters[2] = _options.sky ? (_options.darkSky ? 2 : 1) : 0;
     uniforms.background[0] = _options.colour.x;
     uniforms.background[1] = _options.colour.y;
     uniforms.background[2] = _options.colour.z;
@@ -361,6 +366,7 @@ static NSDictionary *summary(const std::vector<double>& values) {
             @"cpu_encode_ms": summary(_cpuMilliseconds), @"gpu_ms": summary(_gpuMilliseconds),
             @"presentation_interval_ms": summary(intervals), @"dropped_metric_samples": @(_droppedMetricSamples),
             @"snapshot_count": @(_capture ? _capture->frames.size() : 0),
+            @"snapshot_index": @(_frame), @"snapshot_interval_seconds": @(_options.snapshotInterval),
             @"atom_count": @(_capture ? _capture->topology.atoms.size() : 0),
             @"bond_count": @(_capture ? _capture->topology.bonds.size() : 0) };
     }

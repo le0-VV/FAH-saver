@@ -61,7 +61,8 @@ int main(int argc, const char *argv[]) {
                     std::puts("FAH Metal preview/benchmark\n"
                         "  --capture PATH | --source ws://HOST:7396/api/websocket [--unit ID]\n"
                         "  --style 1|2|3|cycle|random --playback latest|loop --fps 1..240\n"
-                        "  --background sky|solid --colour R,G,B --warmup 0..120 --seconds N\n"
+                        "  --background sky|dark|solid --colour R,G,B --snapshot-interval 0.05..60\n"
+                        "  --warmup 0..120 --seconds N\n"
                         "  --width PIXELS --height PIXELS --offscreen --screenshot PATH\n"
                         "Offscreen mode reports GPU submissions, not displayed frame rate.\n"
                         "Screenshots require --offscreen. No screensaver is installed or activated.");
@@ -76,6 +77,11 @@ int main(int argc, const char *argv[]) {
                 else if (flag == "--screenshot") screenshotPath = value;
                 else if (flag == "--seconds") seconds = number(value,"duration");
                 else if (flag == "--warmup") warmup = number(value,"warm-up duration");
+                else if (flag == "--snapshot-interval") {
+                    options.snapshotInterval = number(value,"snapshot interval");
+                    if (options.snapshotInterval < .05 || options.snapshotInterval > 60)
+                        throw std::runtime_error("Snapshot interval must be between 0.05 and 60 seconds");
+                }
                 else if (flag == "--fps") {
                     const double fps = number(value,"frame-rate limit");
                     if (fps != std::floor(fps) || fps < 1 || fps > 240)
@@ -96,8 +102,10 @@ int main(int argc, const char *argv[]) {
                     if (value != "latest" && value != "loop") throw std::runtime_error("Playback must be latest or loop");
                     options.loop = value == "loop";
                 } else if (flag == "--background") {
-                    if (value != "sky" && value != "solid") throw std::runtime_error("Background must be sky or solid");
-                    options.sky = value == "sky";
+                    if (value != "sky" && value != "dark" && value != "solid")
+                        throw std::runtime_error("Background must be sky, dark or solid");
+                    options.sky = value != "solid";
+                    options.darkSky = value == "dark";
                 } else if (flag == "--colour") {
                     const auto a = value.find(','), b = a == std::string::npos ? a : value.find(',',a+1);
                     if (a == std::string::npos || b == std::string::npos || value.find(',',b+1) != std::string::npos)
@@ -234,7 +242,7 @@ int main(int argc, const char *argv[]) {
             metrics[@"warmup_seconds"] = @(actualWarmup);
             metrics[@"early_exit"] = @(!offscreen && !window.isVisible);
             metrics[@"elapsed_seconds"] = @(renderedSeconds);
-            metrics[@"background"] = options.sky ? @"sky" : @"solid";
+            metrics[@"background"] = options.sky ? (options.darkSky ? @"dark" : @"sky") : @"solid";
             metrics[@"playback"] = options.loop ? @"loop" : @"latest";
             metrics[@"style"] = options.styleMode == FAHStyleMode::Fixed ?
                 [NSString stringWithFormat:@"%d",static_cast<int>(options.style)] :

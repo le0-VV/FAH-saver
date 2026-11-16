@@ -2,6 +2,7 @@
 #include "fah/Source.hpp"
 
 #include <memory>
+#include <cmath>
 #include <string>
 
 static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
@@ -18,7 +19,7 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     NSUInteger _sourceCallbackCount, _animationCallbackCount, _measurementCallbackBaseline;
     NSWindow *_sheet;
     NSPopUpButton *_inputMode, *_playback, *_style, *_background;
-    NSTextField *_sourceURL, *_unit, *_capturePath, *_fps;
+    NSTextField *_sourceURL, *_unit, *_capturePath, *_fps, *_snapshotInterval, *_snapshotIntervalUnit;
     NSColorWell *_colour;
 }
 
@@ -35,7 +36,8 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     [_defaults registerDefaults:@{ @"inputMode": @0,
         @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
         @"capturePath": @"", @"loop": @NO, @"style": @0, @"fps": @60,
-        @"sky": @YES, @"red": @.02, @"green": @.025, @"blue": @.035 }];
+        @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @.5,
+        @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;
     _renderer = [[FAHRenderer alloc] initWithDevice:MTLCreateSystemDefaultDevice() error:&error];
     _metalView = [[MTKView alloc] initWithFrame:self.bounds device:_renderer.device];
@@ -64,10 +66,12 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
 - (BOOL)loadOptions {
     _options.fps = static_cast<int>([_defaults integerForKey:@"fps"]);
     _options.loop = [_defaults boolForKey:@"loop"];
+    _options.snapshotInterval = [_defaults doubleForKey:@"snapshotInterval"];
     const NSInteger style = [_defaults integerForKey:@"style"];
     _options.style = style < 3 ? static_cast<fah::Style>(style+1) : fah::Style::SpaceFilling;
     _options.styleMode = style == 3 ? FAHStyleMode::Cycle : style == 4 ? FAHStyleMode::Random : FAHStyleMode::Fixed;
     _options.sky = [_defaults boolForKey:@"sky"];
+    _options.darkSky = [_defaults boolForKey:@"darkSky"];
     _options.colour = {[_defaults floatForKey:@"red"], [_defaults floatForKey:@"green"], [_defaults floatForKey:@"blue"]};
     try {
         if (style < 0 || style > 4 || [_defaults integerForKey:@"inputMode"] < 0 || [_defaults integerForKey:@"inputMode"] > 1)
@@ -214,7 +218,16 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     NSButton *browse = [NSButton buttonWithTitle:@"Browse…" target:self action:@selector(browseCapture:)];
     browse.frame = NSMakeRect(475,244,80,26); [content addSubview:browse];
     label(@"Snapshots",210); _playback = popup(@[@"Follow latest", @"Loop available frames"],210);
+    _playback.frame = NSMakeRect(170,210,200,26);
     [_playback selectItemAtIndex:[_defaults boolForKey:@"loop"] ? 1 : 0];
+    _playback.target = self; _playback.action = @selector(updatePlaybackControls:);
+    _snapshotInterval = text([[_defaults objectForKey:@"snapshotInterval"] stringValue],210);
+    _snapshotInterval.frame = NSMakeRect(380,210,65,24);
+    _snapshotInterval.accessibilityLabel = @"Seconds between snapshots";
+    _snapshotInterval.toolTip = @"0.05–60 seconds between snapshots. This does not change the display frame rate.";
+    _snapshotIntervalUnit = [NSTextField labelWithString:@"seconds/frame"];
+    _snapshotIntervalUnit.frame = NSMakeRect(450,210,110,24); [content addSubview:_snapshotIntervalUnit];
+    [self updatePlaybackControls:nil];
     label(@"Model style",175); _style = popup(@[@"Space-filling",@"Ball-and-stick",@"Sticks",@"Cycle styles",@"Random styles"],175);
     [_style selectItemAtIndex:[_defaults integerForKey:@"style"]];
     label(@"Frame-rate limit",140); _fps = text([[_defaults objectForKey:@"fps"] stringValue],140);
@@ -222,8 +235,8 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _fps.accessibilityLabel = @"Frame-rate limit in frames per second";
     NSTextField *unitLabel = [NSTextField labelWithString:@"fps (1–240)"];
     unitLabel.frame = NSMakeRect(270,140,140,24); [content addSubview:unitLabel];
-    label(@"Background",105); _background = popup(@[@"Sky and grid",@"Solid colour"],105);
-    [_background selectItemAtIndex:[_defaults boolForKey:@"sky"] ? 0 : 1];
+    label(@"Background",105); _background = popup(@[@"Light sky and grid",@"Dark sky and grid",@"Solid colour"],105);
+    [_background selectItemAtIndex:![_defaults boolForKey:@"sky"] ? 2 : ([_defaults boolForKey:@"darkSky"] ? 1 : 0)];
     _colour = [[NSColorWell alloc] initWithFrame:NSMakeRect(430,105,65,26)];
     _colour.color = [NSColor colorWithSRGBRed:[_defaults floatForKey:@"red"]
         green:[_defaults floatForKey:@"green"] blue:[_defaults floatForKey:@"blue"] alpha:1];
@@ -233,11 +246,28 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     _background.accessibilityLabel = @"Background";
     _colour.accessibilityLabel = @"Solid background colour";
     [content addSubview:_colour];
+    NSBundle *module = [NSBundle bundleForClass:FAHSaverView.class];
+    NSString *version = [module objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+    NSString *build = [module objectForInfoDictionaryKey:@"CFBundleVersion"];
+    NSTextField *versionLabel = [NSTextField labelWithString:version.length && build.length ?
+        [NSString stringWithFormat:@"Version %@ (%@)",version,build] : @"Version unavailable"];
+    versionLabel.frame = NSMakeRect(20,24,300,20);
+    versionLabel.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    versionLabel.textColor = NSColor.secondaryLabelColor;
+    versionLabel.accessibilityLabel = @"Screensaver version";
+    [content addSubview:versionLabel];
     NSButton *save = [NSButton buttonWithTitle:@"Save" target:self action:@selector(saveOptions:)];
     save.frame = NSMakeRect(460,20,95,32); save.keyEquivalent = @"\r"; [content addSubview:save];
     NSButton *cancel = [NSButton buttonWithTitle:@"Cancel" target:self action:@selector(cancelOptions:)];
     cancel.frame = NSMakeRect(355,20,95,32); cancel.keyEquivalent = @"\x1b"; [content addSubview:cancel];
     return _sheet;
+}
+
+- (void)updatePlaybackControls:(id)sender {
+    const BOOL loop = _playback.indexOfSelectedItem == 1;
+    _snapshotInterval.hidden = !loop;
+    _snapshotInterval.enabled = loop;
+    _snapshotIntervalUnit.hidden = !loop;
 }
 
 - (void)browseCapture:(id)sender {
@@ -251,6 +281,14 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     NSInteger fps;
     BOOL valid = [scanner scanInteger:&fps] && scanner.isAtEnd && fps >= 1 && fps <= 240;
     NSString *problem = valid ? nil : @"Enter a whole frame-rate limit from 1 to 240 fps.";
+    double interval = [_defaults doubleForKey:@"snapshotInterval"];
+    if (!problem && _playback.indexOfSelectedItem == 1) {
+        NSScanner *intervalScanner = [NSScanner scannerWithString:_snapshotInterval.stringValue];
+        intervalScanner.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        if (![intervalScanner scanDouble:&interval] || !intervalScanner.isAtEnd ||
+            !std::isfinite(interval) || interval < .05 || interval > 60)
+            problem = @"Enter a snapshot interval from 0.05 to 60 seconds.";
+    }
     if (!problem && _inputMode.indexOfSelectedItem == 0) {
         NSURL *url = [NSURL URLWithString:_sourceURL.stringValue];
         if (!url.host.length || !([url.scheme isEqualToString:@"ws"] || [url.scheme isEqualToString:@"wss"]))
@@ -267,9 +305,11 @@ static NSString * const FAHDefaultsName = @"org.fahsaver.screensaver";
     [_defaults setObject:_unit.stringValue forKey:@"unit"];
     [_defaults setObject:_capturePath.stringValue forKey:@"capturePath"];
     [_defaults setBool:_playback.indexOfSelectedItem == 1 forKey:@"loop"];
+    [_defaults setDouble:interval forKey:@"snapshotInterval"];
     [_defaults setInteger:_style.indexOfSelectedItem forKey:@"style"];
     [_defaults setInteger:fps forKey:@"fps"];
-    [_defaults setBool:_background.indexOfSelectedItem == 0 forKey:@"sky"];
+    [_defaults setBool:_background.indexOfSelectedItem != 2 forKey:@"sky"];
+    [_defaults setBool:_background.indexOfSelectedItem == 1 forKey:@"darkSky"];
     NSColor *colour = [_colour.color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
     [_defaults setFloat:colour.redComponent forKey:@"red"];
     [_defaults setFloat:colour.greenComponent forKey:@"green"];

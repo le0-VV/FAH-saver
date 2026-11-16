@@ -1,10 +1,11 @@
 # macOS native prototype
 
-The CMake subdirectory builds three targets:
+The CMake subdirectory builds these targets:
 
 - `fah_macos_preview`: a native Metal preview and measurement harness.
 - `FAHSaver`: a real ScreenSaverView module, packaged as `FAHSaver.saver`.
 - `fah_macos_saver_smoke`: a hidden module host for lifecycle smoke checks.
+- `fah_macos_render_options_tests`: offscreen GPU checks when testing is enabled.
 
 The parent build supplies `fah_core` and `fah_source`. All targets use the system
 AppKit, Metal, MetalKit and QuartzCore frameworks. The saver and module host also
@@ -28,7 +29,10 @@ Example commands, using paths from the parent build directory:
 ```
 
 Use `--style cycle` or `--style random` for timed style changes. The provisional
-style interval is 10 seconds; loop playback advances a snapshot every 0.1 seconds.
+style interval is 10 seconds. Loop playback defaults to a snapshot every 0.5
+seconds; `--snapshot-interval 0.05..60` changes that interval. Latest mode ignores
+the loop clock. Use `--snapshot-interval 0.1` to repeat the historical browser
+comparison with its original cadence.
 The user frame-rate limit does not alter snapshot cadence. `--unit ID` selects a
 specific WU for a live source. Without an ID, the source selects the first running
 WU and reports when none is available. The harness waits up to 30 seconds for its
@@ -54,8 +58,11 @@ updates. Per-display-frame work updates camera uniforms and submits draw calls.
 ## Screensaver options and checks
 
 The native options sheet selects a live source or capture file, optional WU ID,
-latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a sky
-or solid-colour background. Options use ScreenSaverDefaults. Starting and stopping
+latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a light
+sky/grid, dark sky/grid or solid-colour background. The loop interval field is
+visible only in loop mode and defaults to 0.5 seconds. `--background sky|dark|solid`
+selects these backgrounds in the preview. The panel's lower-left corner shows
+the version and build of the loaded saver bundle. Options use ScreenSaverDefaults. Starting and stopping
 the saver starts and stops its native source; a source reset clears the model.
 Missing data and connection errors appear as text over the background.
 
@@ -66,8 +73,8 @@ python3 /path/to/source/platform/macos/test_cli.py ./platform/macos/fah_macos_pr
   ./platform/macos/FAHSaver.saver /path/to/capture.json
 ```
 
-The smoke host loads the actual module, checks its principal class and options
-sheet, then runs ten start/stop cycles with two independent views of different
+The smoke host loads the actual module, checks its principal class, version label
+and loop-only interval controls, then runs ten start/stop cycles with two independent views of different
 sizes. Stopping one view must leave the other animating. This hidden check does
 not submit display drawables or establish multi-display presentation.
 It uses a volatile `NSArgumentDomain`

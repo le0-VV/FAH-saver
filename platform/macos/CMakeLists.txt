@@ -25,3 +25,11 @@ add_custom_command(TARGET FAHSaver POST_BUILD
 add_executable(fah_macos_saver_smoke SaverSmoke.mm)
 target_compile_options(fah_macos_saver_smoke PRIVATE -fobjc-arc)
 target_link_libraries(fah_macos_saver_smoke PRIVATE fah_core "-framework AppKit" "-framework MetalKit" "-framework QuartzCore" "-framework ScreenSaver")
+
+if(BUILD_TESTING)
+    add_executable(fah_macos_render_options_tests RenderOptionsTests.mm)
+    target_compile_options(fah_macos_render_options_tests PRIVATE -fobjc-arc)
+    target_link_libraries(fah_macos_render_options_tests PRIVATE fah_metal)
+    add_test(NAME mac_render_options COMMAND fah_macos_render_options_tests
+        "${PROJECT_SOURCE_DIR}/tests/fixtures/synthetic-small.json")
+endif()

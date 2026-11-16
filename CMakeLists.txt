@@ -3,7 +3,7 @@ if(CMAKE_HOST_APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS deployment target")
 endif()
 
-project(FAHSaver VERSION 0.1.0 LANGUAGES CXX)
+project(FAHSaver VERSION 0.1.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,6 +63,8 @@ if(APPLE)
         add_test(NAME mac_source_diagnostics COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/mac_source_diagnostics.py" "$<TARGET_FILE:fah_capture>")
         set_tests_properties(mac_source_diagnostics PROPERTIES TIMEOUT 20)
+        add_test(NAME mac_preview_cli COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/test_cli.py" "$<TARGET_FILE:fah_macos_preview>")
         add_test(NAME web_benchmark_help COMMAND fah_web_benchmark --help)
         add_test(NAME web_benchmark_rejects_nan COMMAND fah_web_benchmark
             --capture absent --html absent --fps nan)

@@ -44,6 +44,7 @@ struct VolatilePreferences {
         arguments[@"fps"] = @60;
         arguments[@"style"] = @1;
         arguments[@"loop"] = @NO;
+        arguments[@"snapshotInterval"] = @.5;
         arguments[@"sky"] = @YES;
         [defaults setVolatileDomain:arguments forName:NSArgumentDomain];
     }
@@ -52,6 +53,13 @@ struct VolatilePreferences {
         else [defaults removeVolatileDomainForName:NSArgumentDomain];
     }
 };
+
+static NSView *namedControl(NSView *root, NSString *name) {
+    if ([root.accessibilityLabel isEqualToString:name]) return root;
+    for (NSView *child in root.subviews)
+        if (NSView *found = namedControl(child,name)) return found;
+    return nil;
+}
 
 static NSString *captureWindow(NSWindow *window, NSString *path) {
     NSTask *task = [NSTask new];
@@ -106,6 +114,26 @@ int main(int argc, const char *argv[]) {
                 isPreview:!fullscreen preferences:defaults];
             if (!view || !view.hasConfigureSheet || !view.configureSheet)
                 throw std::runtime_error("Saver view or configuration sheet could not be created");
+            NSView *controls = view.configureSheet.contentView;
+            NSTextField *version = (NSTextField *)namedControl(controls,@"Screensaver version");
+            NSString *bundleVersion = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+            if (!version || !bundleVersion.length || ![version.stringValue containsString:bundleVersion])
+                throw std::runtime_error("Options do not show the loaded screensaver version");
+            NSPopUpButton *playback = (NSPopUpButton *)namedControl(controls,@"Snapshot playback");
+            NSTextField *interval = (NSTextField *)namedControl(controls,@"Seconds between snapshots");
+            if (!playback || !interval || !interval.hidden || interval.enabled || interval.doubleValue != .5)
+                throw std::runtime_error("Latest mode exposes the loop interval or has the wrong default");
+            [playback selectItemAtIndex:1];
+            [NSApp sendAction:playback.action to:playback.target from:playback];
+            if (interval.hidden || !interval.enabled)
+                throw std::runtime_error("Loop mode did not expose its snapshot interval");
+            [playback selectItemAtIndex:0];
+            [NSApp sendAction:playback.action to:playback.target from:playback];
+            if (!interval.hidden || interval.enabled)
+                throw std::runtime_error("Latest mode did not hide the loop interval");
+            NSPopUpButton *background = (NSPopUpButton *)namedControl(controls,@"Background");
+            if (!background || background.numberOfItems != 3)
+                throw std::runtime_error("Background presets are missing from the options");
             if ([defaults integerForKey:@"inputMode"] != 1)
                 throw std::runtime_error("Volatile capture preferences were not applied");
             NSString *exitReason = @"ten_start_stop_cycles";
