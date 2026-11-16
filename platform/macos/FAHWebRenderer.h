@@ -17,8 +17,10 @@
 - (void)start;
 // Disposes the JavaScript renderer and releases the WebView, even while this owner is retained.
 - (void)stop;
+// Requests made while the page loads are applied once it is ready; stop cancels them.
 - (void)beginMeasurement;
 - (NSDictionary *)metrics;
 - (void)refreshMetrics:(void (^)(NSDictionary *metrics))completion;
+// A stopped or replaced page completes with a cancellation error.
 - (void)renderAt:(double)seconds completion:(void (^)(NSDictionary *metrics, NSError *error))completion;
 @end

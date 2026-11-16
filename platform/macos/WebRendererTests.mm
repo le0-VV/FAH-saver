@@ -52,7 +52,9 @@ int main(int argc,const char *argv[]) {
             @autoreleasepool { [host addSubview:[renderer prepareWithFrame:host.bounds]]; }
             [renderer setCapture:capture];
             FAHRenderOptions options; options.loop = true;
-            [renderer setOptions:options]; [renderer start]; ready(renderer);
+            [renderer setOptions:options]; [renderer beginMeasurement]; [renderer start]; ready(renderer);
+            check([evaluate(renderer,@"window.fahSaver.metrics()")[@"measurementElapsedSeconds"] doubleValue] > 0,
+                  "Measurement requested before readiness was lost");
             for (double interval : {1.0,1.25,120.0}) {
                 options.snapshotInterval = interval; [renderer setOptions:options]; ready(renderer);
                 for (const auto sample : {std::pair<double,unsigned>{0,0},{interval-.001,0},{interval,1},{2*interval,0}})
@@ -117,10 +119,46 @@ int main(int argc,const char *argv[]) {
             [renderer setCapture:nullptr]; ready(renderer);
             check([evaluate(renderer,@"window.fahSaver.metrics()")[@"snapshotCount"] unsignedIntegerValue] == 0,
                   "Cleared source retained the previous model in WebKit");
+            FAHWebRenderer *second = [[FAHWebRenderer alloc] initWithAssetsURL:[NSURL fileURLWithPath:
+                [NSString stringWithUTF8String:argv[1]] isDirectory:YES] error:&error];
+            @autoreleasepool { [host addSubview:[second prepareWithFrame:host.bounds]]; }
+            [second setCapture:capture]; [second start]; ready(second);
+            __weak WKWebsiteDataStore *sharedStore;
             __weak WKWebView *old;
-            @autoreleasepool { old = renderer.webView; [renderer stop]; }
+            @autoreleasepool {
+                WKWebsiteDataStore *store = renderer.webView.configuration.websiteDataStore;
+                check(!store.persistent && store == second.webView.configuration.websiteDataStore,
+                      "Concurrent renderers do not share one ephemeral session");
+                sharedStore = store; old = renderer.webView;
+            }
+            check([draw(second,0)[@"snapshotCount"] unsignedIntegerValue] == 1 &&
+                  [evaluate(renderer,@"window.fahSaver.metrics()")[@"snapshotCount"] unsignedIntegerValue] == 0,
+                  "Shared session coupled the renderers' model state");
+            auto cancelled = std::make_shared<bool>(false);
+            __block NSError *cancelError;
+            [renderer renderAt:999 completion:^(NSDictionary *metrics,NSError *error) { cancelError = error; *cancelled = true; }];
+            @autoreleasepool { [renderer stop]; }
+            waitFor([&]{return *cancelled;},"Cancelled fixed-time render never completed");
+            check(cancelError != nil,"Old-page fixed-time render was accepted after stop");
             waitFor([&]{return old == nil;},"Stop retained the old WebView");
-            check(!renderer.webView && !renderer.ready,"Stopped renderer retains its page");
+            check(sharedStore != nil && second.ready && [draw(second,0)[@"draws"] unsignedIntegerValue] > 0,
+                  "Stopping one renderer destroyed the other renderer's session");
+            @autoreleasepool { [host addSubview:[renderer prepareWithFrame:host.bounds]]; }
+            [renderer setCapture:capture]; [renderer start]; ready(renderer);
+            auto rendered = std::make_shared<bool>(false);
+            __block NSDictionary *freshMetrics;
+            __block NSError *freshError;
+            [renderer renderAt:0 completion:^(NSDictionary *metrics,NSError *error) {
+                freshMetrics = metrics; freshError = error; *rendered = true;
+            }];
+            waitFor([&]{return *rendered;},"Restarted renderer did not draw");
+            check(!freshError && [freshMetrics[@"submitted_frames"] unsignedIntegerValue] > 0 &&
+                  [freshMetrics[@"elapsedSeconds"] doubleValue] == 0 &&
+                  [freshMetrics[@"gpuTiming"][@"status"] isEqual:@"disabled"],
+                  "Restart retained old-page metrics or measurement intent");
+            @autoreleasepool { [renderer stop]; [second stop]; }
+            waitFor([&]{return sharedStore == nil;},"Last renderer release retained the shared ephemeral session");
+            check(!renderer.webView && !renderer.ready && !second.webView,"Stopped renderers retain a page");
             check(!window.visible,"Web test displayed a window");
             for (double interval : {0.0,.049,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
                 options.snapshotInterval = interval; bool rejected = false;

@@ -4,6 +4,23 @@
 #include <cmath>
 #include <string>
 
+static void configureSharedSession(WKWebViewConfiguration *configuration) {
+    // All calls are on WebKit's main thread; the last WebView releases this private session.
+    static __weak WKWebsiteDataStore *sharedStore;
+    WKWebsiteDataStore *store = sharedStore;
+    if (!store) sharedStore = store = WKWebsiteDataStore.nonPersistentDataStore;
+    configuration.websiteDataStore = store;
+    if (@available(macOS 12.0, *)) return;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    // Process pools affect only the supported macOS 11 path.
+    static __weak WKProcessPool *sharedPool;
+    WKProcessPool *pool = sharedPool;
+    if (!pool) sharedPool = pool = [WKProcessPool new];
+    configuration.processPool = pool;
+#pragma clang diagnostic pop
+}
+
 @interface FAHWeakScriptHandler : NSObject <WKScriptMessageHandler>
 @property(nonatomic, weak) id<WKScriptMessageHandler> target;
 @end
@@ -25,7 +42,7 @@
     const fah::Capture *_sentIdentity;
     std::size_t _sentFrames;
     NSUInteger _captureRevision, _sentRevision, _generation;
-    BOOL _ready, _running, _started, _busy, _optionsDirty, _measuring;
+    BOOL _ready, _running, _started, _busy, _optionsDirty, _measuring, _measurementPending;
     NSString *_lastError;
     NSDictionary *_javascriptMetrics;
 }
@@ -56,7 +73,7 @@
     _sentIdentity = nullptr; _sentFrames = _sentRevision = 0;
     _optionsDirty = YES;
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
-    configuration.websiteDataStore = WKWebsiteDataStore.nonPersistentDataStore;
+    configureSharedSession(configuration);
     _handler = [FAHWeakScriptHandler new]; _handler.target = self;
     [configuration.userContentController addScriptMessageHandler:_handler name:@"renderer"];
     _webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
@@ -91,7 +108,7 @@
 }
 - (void)start { _running = YES; [self pump]; }
 - (void)stop {
-    _running = _ready = _started = _busy = NO; ++_generation;
+    _running = _ready = _started = _busy = _measuring = _measurementPending = NO; ++_generation;
     if (_webView) {
         // Releasing the page also terminates its rAF/context if script execution is interrupted.
         [_webView evaluateJavaScript:@"window.fahSaver && window.fahSaver.dispose()" completionHandler:nil];
@@ -150,6 +167,10 @@
             }
         }
         if (_running && !_started) { [script appendString:@"window.fahSaver.start();"]; _started = YES; }
+        if (_measurementPending) {
+            [script appendString:@"window.fahSaver.beginMeasurement();"];
+            _measurementPending = NO;
+        }
         if (!script.length) return;
         [script appendString:@"window.fahSaver.metrics();"];
         _busy = YES;
@@ -170,14 +191,14 @@
     }
 }
 - (void)beginMeasurement {
-    _measuring = YES;
-    if (_ready) [_webView evaluateJavaScript:@"window.fahSaver.beginMeasurement()" completionHandler:nil];
+    _measuring = _measurementPending = YES;
+    [self pump];
 }
 - (NSDictionary *)metrics {
     NSMutableDictionary *value = _javascriptMetrics ? [_javascriptMetrics mutableCopy] : [NSMutableDictionary new];
     value[@"renderer"] = @"WKWebView / WebGL2";
     value[@"ready"] = @(_ready); value[@"running"] = @(_running);
-    value[@"pending_updates"] = @(_busy || _optionsDirty || (_capture && (_sentIdentity != _capture.get() || _sentCapture.expired() ||
+    value[@"pending_updates"] = @(_busy || _optionsDirty || _measurementPending || (_capture && (_sentIdentity != _capture.get() || _sentCapture.expired() ||
         (_options.loop ? _sentFrames < _capture->frames.size() : _sentRevision != _captureRevision))));
     value[@"submitted_frames"] = @([value[_measuring ? @"measurementDraws" : @"draws"] unsignedIntegerValue]);
     value[@"snapshot_count"] = @(_capture ? _capture->frames.size() : 0);
@@ -207,10 +228,15 @@
         return;
     }
     NSString *script = [NSString stringWithFormat:@"window.fahSaver.renderAt(%.17g);window.fahSaver.metrics()",seconds];
+    const NSUInteger generation = _generation;
     __weak FAHWebRenderer *weakSelf = self;
     [_webView evaluateJavaScript:script completionHandler:^(id result,NSError *error) {
         FAHWebRenderer *owner = weakSelf;
-        if (!owner) return;
+        if (!owner || owner->_generation != generation) {
+            if (completion) completion(owner ? [owner metrics] : @{},[NSError errorWithDomain:@"org.fahsaver.web-renderer" code:3
+                userInfo:@{NSLocalizedDescriptionKey:@"Rendering was cancelled because its page stopped."}]);
+            return;
+        }
         if ([result isKindOfClass:NSDictionary.class]) owner->_javascriptMetrics = result;
         if (completion) completion([owner metrics],error);
     }];
