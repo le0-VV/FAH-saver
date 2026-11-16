@@ -81,13 +81,28 @@ struct ProcessHandle {
     ~ProcessHandle() { if (value) CloseHandle(value); }
 };
 struct Snapshot {
-    HANDLE process;
     HPSS value = nullptr;
-    ~Snapshot() { if (value) PssFreeSnapshot(process, value); }
+    ~Snapshot() { if (value) PssFreeSnapshot(GetCurrentProcess(), value); }
+    void release() {
+        const auto handle = value;
+        value = nullptr;
+        if (handle) {
+            const auto error = PssFreeSnapshot(GetCurrentProcess(), handle);
+            if (error) fail("Free local snapshot", error);
+        }
+    }
 };
 struct Marker {
     HPSSWALK value = nullptr;
     ~Marker() { if (value) PssWalkMarkerFree(value); }
+    void release() {
+        const auto handle = value;
+        value = nullptr;
+        if (handle) {
+            const auto error = PssWalkMarkerFree(handle);
+            if (error) fail("Free snapshot walk marker", error);
+        }
+    }
 };
 std::uint64_t ticks(FILETIME time) {
     return (std::uint64_t(time.dwHighDateTime) << 32) | time.dwLowDateTime;
@@ -161,7 +176,7 @@ std::vector<Module> modulesFor(HANDLE process) {
 }
 std::vector<Thread> threadsFor(HANDLE process, DWORD pid, DWORD contextThread = 0) {
     const bool contexts = contextThread != 0;
-    Snapshot snapshot{process};
+    Snapshot snapshot;
     const auto flags = static_cast<PSS_CAPTURE_FLAGS>(PSS_CAPTURE_THREADS |
         (contexts ? PSS_CAPTURE_THREAD_CONTEXT : 0));
     auto error = PssCaptureSnapshot(process, flags, contexts ? CONTEXT_CONTROL : 0, &snapshot.value);
@@ -188,6 +203,8 @@ std::vector<Thread> threadsFor(HANDLE process, DWORD pid, DWORD contextThread = 
         threads.push_back(thread);
     }
     if (threads.empty()) throw std::runtime_error("Snapshot returned no test-process threads");
+    marker.release();
+    snapshot.release();
     return threads;
 }
 

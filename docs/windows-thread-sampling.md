@@ -61,6 +61,15 @@ calls `SuspendThread`.
 Snapshots, walk markers and process handles are released on success and errors.
 [Capture flags](https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/ne-processsnapshot-pss_capture_flags).
 
+The process handle passed to `PssCaptureSnapshot` selects the target to inspect.
+The returned snapshot belongs to this diagnostic process, so `PssFreeSnapshot`
+receives `GetCurrentProcess()`, not the target handle. Normal-path snapshot and
+walk-marker release errors are checked. Scoped destructors attempt cleanup if an
+earlier operation throws. A release attempt clears its stored descriptor before
+calling Windows, so a failed release is reported without retrying a descriptor
+whose state is uncertain.
+[Snapshot ownership and release](https://learn.microsoft.com/en-us/windows/win32/api/processsnapshot/nf-processsnapshot-pssfreesnapshot).
+
 Give the test process enough lifetime for the 1.5-second CPU interval and optional
 two-second sample pass. The coordinator should apply an external timeout, such
 as eight seconds, to this helper. Individual Windows calls have no timeout, so
