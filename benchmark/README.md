@@ -4,6 +4,11 @@ This dependency-free WebGL 2 renderer uses the same instanced sphere and cylinde
 meshes, atom radii, camera fit and simple lighting as the native candidates.
 It is a benchmark candidate, not the selected shipping screensaver.
 
+The drawing engine in `web/renderer.js` is shared with the local screensaver
+runtime. `web/saver.html` has no controls or network source; its native bridge
+contract is documented in [RUNTIME.md](web/RUNTIME.md). The normal production
+module remains Metal after the measured WebView experiment.
+
 When bonds exist, framing uses every atom referenced by a bond, across all bonded
 components. Otherwise it uses all atoms. Every atom is still submitted at its
 original relative position; framing does not wrap, filter or distort coordinates.
@@ -61,6 +66,71 @@ build/fah_web_benchmark --capture captures/protein.json \
 Width and height are physical drawable pixels. The host injects the capture and
 does not start a local web server. Its CPU and memory metrics cover the host
 only; separate WebKit processes remain explicitly unmeasured.
+
+## Matched macOS app comparison
+
+The newer `fah_engine_comparison` target produces
+`build/benchmark/macos/FAHEngineComparison.app`. It hosts the actual Metal
+renderer or native Web bridge, with one to three explicitly sized canvases.
+Launch the app normally through LaunchServices/Finder so it has its own process
+responsibility identity. It reads `Contents/Resources/Comparison.json`.
+Use a private configuration and output directory. For example:
+
+```json
+{
+  "engine": "web",
+  "webBackend": "legacy",
+  "webClock": "native",
+  "capture": "/private/path/protein.json",
+  "layouts": [{"width": 2880, "height": 1800, "screen": 0}],
+  "warmupSeconds": 10,
+  "measureSeconds": 30,
+  "cooldownSeconds": 10,
+  "style": 1,
+  "fps": 60,
+  "background": "solid",
+  "colour": [0.02, 0.025, 0.035],
+  "collectMetrics": false,
+  "output": "/private/path/trial.json",
+  "status": "/private/path/status.json"
+}
+```
+
+`engine` is `metal` or `web`; the explicit Web backend is `wk` or `legacy`.
+`webClock` is `raf` or `native`. No automatic backend fallback occurs. Native
+clock mode coalesces elapsed-time requests and bounds JavaScript transactions,
+not GPU completion. The production WebKit experiment required it because rAF
+did not provide continuous animation in the tested host. Apple recommends
+WKWebView rather than the deprecated in-process WebView API.
+
+The app checks actual physical canvas dimensions and reports draw deltas. It
+releases presentation owners and holds the app alive during stopped cooldown.
+Normal-cost runs leave `collectMetrics` false. Separate timing runs enable
+Metal presentation/GPU samples and optional WebGL GPU queries; unsupported
+queries are explicit. Callback/submission cadence is not display presentation.
+
+Start the external sampler before launching the app:
+
+```sh
+python3 tools/macos-render-sample.py --status /private/path/status.json \
+  --output /private/path/processes.json --seconds 120 --gpu
+```
+
+The sampler measures the host plus its WebKit services using kernel process
+responsibility, follows known process identities after exit and samples
+simultaneous process footprints. Its responsibility query is benchmark-only
+private macOS SPI and fails explicitly if unavailable. CPU counters are converted
+from Mach ticks and checked against `getrusage` by `--self-test`. IORegistry GPU
+utilisation covers the whole device and can include other workloads. Use native
+hardware sampling when that counter is contaminated; mark per-process GPU time
+unavailable on systems that do not expose it.
+
+For fixed-time image checks, set `mode: "screenshot"`, `fixedTimeSeconds` and a
+`screenshot` output path. Run the app's executable with
+`--render-reference /absolute/config.json`. This path never orders or activates
+windows and is explicitly labelled as hidden reference rendering. It cannot
+serve as a process-responsibility or presentation benchmark. The config/help
+checks run without creating UI.
 
 ## Native web-view harness
 

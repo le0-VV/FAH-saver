@@ -458,6 +458,112 @@ here. These findings prioritise the remaining inactive/extra renderer and GPU
 frame concurrency. Changing drawable buffering needs a 60 fps presentation test.
 Profiling made no production code or installation changes.
 
+## macOS WebView replacement experiment on 17 November 2026
+
+The user requested a real WebView engine replacement and RAM/GPU comparison,
+then scoped it to macOS first. The experiment retained native FAH networking,
+latest-frame replay suppression, the persistent model cache and native Options.
+Its bundled local WebGL engine shared geometry/shaders with the comparison page;
+no remote page or library was loaded. Backend and clock selection were explicit,
+with no runtime fallback or quality change.
+
+The initial WKWebView candidate was blank on both displays. Synchronous first
+model drawing fixed the initial-frame dependency, but a visible standalone rAF
+trial still had zero draw growth over ten seconds. Its low resource readings
+were excluded. A coalesced native clock produced continuous drawing at about
+60 draws/s in the standalone app. In the actual legacy host, the model appeared
+and animated briefly, then both displays went blank while draw requests
+continued. Event logs showed three ready contexts, correct 2880x1800/1920x1080
+backing sizes and no JavaScript error before user exit. This resembles the
+[WKWebView legacy-host display issue discussed with Apple DTS](https://developer.apple.com/forums/thread/820860),
+but that source does not establish the precise cause on this Mac.
+
+A separate public in-process WebView backend with the native clock stayed visible
+and animated on both displays in the user's approximately 20-second check.
+This was the working candidate 0.2.0 (15d1) used for the final comparison. It uses
+the older WebView API; Apple recommends WKWebView for modern applications in its
+[WebView documentation](https://developer.apple.com/documentation/webkit/webview-swift.class).
+The legacy candidate remains an experiment, not a newly selected production API.
+
+Before timing, hidden fixed-time PNG checks compared Metal, WK and Legacy with
+the same real one-snapshot fixture at 960x600 in all three styles. Dimensions
+were exact. Metal/Web pixel equality was 99.9943% for space-filling, 99.9825% for
+ball-and-stick and 99.9724% for sticks. At most three pixels per image differed
+by more than two channel levels; WK and Legacy output matched each other.
+The harness was corrected to preserve requested content size rather than count
+titlebar area as a viewport. A failed Legacy 960x536 reference was excluded.
+
+### Matched full-resolution trials
+
+Hardware was this Apple M1 Mac on macOS 26.7.2. Every valid trial used the same
+5,894-atom/10,929-bond single frame, capture SHA256
+`6e2dbc86da4cc14623899a429f7c4335985f618ef3ea5476e9eba5b8c3a9ed99`,
+space-filling style, identical solid colour/camera/geometry, no MSAA and a 60 fps
+cap. Layouts were one 2880x1800 canvas, or that canvas plus one 1920x1080 canvas
+on the other display. Actual canvas dimensions were checked at runtime.
+
+Two trials per engine/layout ran in opposing order: Metal, WebView, WebView,
+Metal. Each used 10 seconds of warm-up, 30 seconds of measurement and 10 seconds
+of stopped cooldown while the app remained alive. Expensive renderer timing
+was disabled for normal-cost trials. Successful submission/draw rates were
+59.78–59.99 per second; these are not verified display-presentation timestamps.
+
+| Layout | Metal steady footprint | WebView steady footprint | Metal CPU | WebView CPU |
+| --- | ---: | ---: | ---: | ---: |
+| One Retina canvas | 131.7–133.6 MiB | 212.2–246.5 MiB | 4.62–5.09% | 8.88–11.92% |
+| Retina plus HD | 183.6–205.0 MiB | 337.6–349.4 MiB | 8.08–8.43% | 21.42–24.51% |
+
+Memory ranges are the two trials' median simultaneous process footprints, not
+independent process peaks. CPU percentages refer to one logical core. The
+external sampler used process responsibility to include associated WebKit
+services rather than measure only the host. The working in-process candidate
+and Metal each had one observed process during steady measurement. A separate
+WK/native-clock accounting check had four; it was not substituted into the
+Legacy result. Sampling was approximately 0.25 seconds, with no process-read
+errors in the eight full-resolution trials. Native CPU counter units were
+validated as Mach ticks against `getrusage` before conversion.
+
+The mean of the two steady footprint medians was 132.7 versus 229.4 MiB for one
+canvas, and 194.3 versus 343.5 MiB for both displays. WebView therefore used
+about 73% and 77% more memory respectively in this test. Mean CPU use was
+4.86 versus 10.40% for one canvas and 8.26 versus 22.96% for both.
+
+### GPU evidence and limits
+
+The WebGL elapsed-time extension was unavailable. Whole-device IORegistry
+utilisation was sampled, but one single-canvas Metal repeat retained high GPU
+activity after the app exited. That counter was not treated as isolated app GPU
+cost. The user then started a bounded, read-only administrator `powermetrics`
+collector for the dual-display comparisons. This M1 did not expose per-task GPU
+time despite the requested flag; only hardware GPU busy-time, frequency states
+and energy estimates were available. System protections were unchanged.
+
+After trimming phase boundaries, each dual-display trial had 26 complete native
+hardware samples. Whole-GPU active residency was 60.64–60.98% for Metal and
+65.46–68.36% for WebView. Estimated energy rate also showed no WebView saving.
+These are whole-device measurements on the same Mac, not per-process GPU
+durations or a universal energy benchmark. Other activity and DVFS can affect
+them. Together with the consistent RAM/CPU regression, they provide no evidence
+that this WebView replacement improves the requested resource use.
+
+The user chose **Restore Metal** after reviewing the measured result. The exact
+installed native 0.1.9 (12) bundle was restored, with SHA256
+`57ef6f0ae3657cfd0fdb8363e59d155a85a5e50d5d2954d13125e9e46d84fc12`
+and verified ad hoc signature. Production source/build selection was also
+returned to Metal. The complete Web module experiment is preserved on
+`agent/webview-saver-experiment`; independent Web libraries, runtime tests,
+reference generation and the comparison app remain available on the normal
+branch. Existing native inactive-view limitations remain separate work.
+
+Raw model fixtures, images, process samples, native hardware records and
+diagnostic logs remain private under `/private/tmp/fah-render-compare-20261117`
+and the named host-check files. Only aggregate results are recorded here.
+All trials and the administrator collector were stopped before completion.
+After the source selection was restored, all 22 integrated CTest checks passed
+in 34.58 seconds. The shared JS suite and native process-accounting self-check
+also passed. The installed native version/build/hash were checked again after
+restoration; its exact 0.1.9 release bundle was retained.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a

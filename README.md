@@ -63,6 +63,17 @@ cadence and uses less later-interval CPU than the observed browser comparison.
 Browser hosts remain available for regression comparisons. A Vulkan-on-Metal
 layer is not required. Sustained performance acceptance is still open.
 
+The 17 November macOS WebView replacement experiment also favoured Metal. At
+matched physical resolution and approximately 60 draws per second, the working
+in-process WebView used 212–247 MiB for one Retina canvas versus 132–134 MiB for
+Metal. With Retina and HD canvases together, it used 338–349 MiB versus
+184–205 MiB. CPU use and sampled whole-GPU busy time were higher with WebView.
+The user chose to restore Metal, and the normal module build selects Metal.
+The complete experimental module is preserved on `agent/webview-saver-experiment`;
+the independent Web renderer and matched comparison app remain available.
+See the [comparison record](docs/verification.md#macos-webview-replacement-experiment-on-17-november-2026)
+for the method, compatibility failures and measurement limits.
+
 ## Build and run
 
 Build on macOS with Xcode command-line tools and CMake:
@@ -180,9 +191,9 @@ conditions, measurements and proposed acceptance criteria.
    winner from CPU utilisation or a desktop preview alone.
 
 Connection loss, missing visualisation data and a changed WU are explicit
-states. A disconnection clears the displayed model and shows connection status.
-The prototypes do not substitute a different protein or silently change renderer
-or quality. Retaining a stale model is not implemented.
+states. A complete cached/latest model remains visible during a disconnection
+or pending WU topology; connection status appears when no model is available.
+The prototypes do not silently change the selected source, renderer or quality.
 
 ## Evidence
 
