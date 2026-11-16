@@ -205,6 +205,70 @@ The Mac cache check passed again after integration. Rebuilding and signing
 produced byte-identical Mac bundle data to the already installed build, so the
 Windows correction required no Mac replacement.
 
+## Version 0.1.7 interval editing and retained-view investigation
+
+The interval default changes to one second without overwriting explicit saved
+values. The artificial 60-second maximum is removed; values must remain finite
+and at least 0.05 seconds. Native edit controls reject characters other than
+ASCII digits and one decimal point, including invalid pasted replacements.
+Empty text and a lone dot are allowed while editing. Save validation uses a
+small inline message instead of a modal alert. Large saved values reopen as
+plain decimal text rather than exponent notation.
+
+Focused Mac decimal, CLI, options lifecycle and GPU checks passed. Save/reopen
+coverage includes 600 seconds, 1e100 and the largest finite double, together with
+invalid input preserving preferences and leaving the options sheet open.
+The Windows decimal and options console tests also passed natively with empty
+stderr, in about 0.045 and 0.040 seconds respectively. Their owned payload and
+temporary directory were removed. Windows native Options interaction was not
+exercised by those console checks.
+
+The user reported a 1+ GB legacyScreenSaver process. Before any restart, PID
+77165 had a 1.1 GB physical footprint. Its memory map showed about 641 MB of
+resident IOSurfaces, including 30 2880x1800 Metal colour drawables and four HD
+colour drawables. Allocated malloc memory was 49.2 MB. Heap inspection found nine
+saver views, renderers, Metal views, layers and source objects. This establishes
+retained presentation resources as the main observed cost; it does not identify
+all allocations or prove every view was receiving stop notifications.
+
+A hidden probe against the installed 0.1.6 bundle reproduced a lifecycle gap:
+hiding or removing a retained view left its timer/source active; an explicit
+stop finally stopped both. No user PID, live source or visible window was used
+for that probe. Raw memory maps remain outside Git.
+
+The saver now suspends on actual hide/ancestor-hide and removal from an existing
+superview. It stops timer/source/cache work and releases the MTKView and its
+CAMetalLayer owner, rather than retaining their drawable pools in an inactive
+view. Showing or reattaching resumes only prior or explicitly deferred start
+intent; an explicit stop cancels it. Initial windowless hosting still works.
+Twenty retained-view lifecycle cycles passed with old Metal view/layer weak
+references becoming nil and no further inactive callbacks or submissions.
+
+All 15 integrated checks passed before deployment. The old host was then
+replaced after preserving its diagnostics. In the new renderer PID 2262, five
+Settings close/reopen cycles resulted in two saver/renderer/Metal/layer/source
+objects at 223.9 MB. Five more cycles in the same PID retained the same counts,
+the same 57.1 MB IOSurface total and a 222.8 MB footprint. This is a bounded
+same-process stability check; it does not establish long-session or every
+screensaver activation path.
+
+Actual options interaction exposed a gap in the initial formatter-only tests:
+the field editor could still accept a letter. The correction uses the public
+native field-editor path to reject proposed edits before mutation. Regressions
+now exercise real NSTextView insertText, keyDown and named-pasteboard handling,
+not just the formatter validation method. Invalid Save feedback is placed
+directly below its field, with lower rows shifted to avoid overlap.
+
+The final 0.1.7 (9) installed bundle was checked in System Settings. After an
+invalid zero value focused the interval editor, typing `a` left the value at
+zero and showed decimal-only feedback directly below that field. A value above
+the former limit remained editable. Test edits were cancelled; reopening Options
+restored the user's saved one-second interval and other settings. The final
+integrated 15-check suite passed again, including actual native editor key/paste
+handling and field-error geometry. The installed hash/signature matched the
+final build. Windows GUI artifacts cross-built with field-local errors; native
+Windows GUI interaction remains untested.
+
 ## Windows prototype measurements
 
 The complete x64 Vulkan host and native WinHTTP source cross-built with a
