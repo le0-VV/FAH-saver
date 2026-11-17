@@ -46,6 +46,13 @@ When FAH runs on the same computer, set the source to
 `ws://127.0.0.1:7396/api/websocket`. For another folding computer, use its private
 LAN or Tailscale address and follow the [direct-access instructions](docs/direct-access.md).
 
+## TODO
+
+- [ ] Folding@home account connection.
+- [ ] Upscaling integration.
+- [ ] Further renderer optimisation.
+- [ ] Linux release.
+
 ## Licence
 
 FAH Saver's original code is licensed under **GPL-3.0-or-later**. See
