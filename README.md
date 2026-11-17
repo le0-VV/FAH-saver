@@ -25,9 +25,9 @@ If an older copy was installed manually in `/Library/Screen Savers` or
 `~/Library/Screen Savers`, remove that copy before switching to Homebrew. Keep
 your existing preferences.
 
-For manual installation, download the
-[Apple-silicon ZIP](https://github.com/le0-VV/FAH-saver/releases/latest/download/FAHSaver-macos-arm64.zip),
-extract it and open `FAHSaver.saver`.
+For manual installation, open the
+[latest release](https://github.com/le0-VV/FAH-saver/releases/latest), download
+the macOS ZIP, extract it and open `FAHSaver.saver`.
 
 Select **FAH Saver** in macOS Screen Saver settings and open **Options** to
 configure the FAH source.

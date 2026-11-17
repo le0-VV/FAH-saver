@@ -909,11 +909,17 @@ The signed `v1.0.0` tag identifies source commit
 ran through manual workflow dispatch and passed. It created a draft release;
 the user explicitly requested that the release remain unpublished.
 
-The draft contains nine assets and `SHA256SUMS`: versioned macOS ARM64 and
-Windows x64 ZIPs, manifests for both, the Windows installer and its manifest,
+The initial draft contained nine assets and `SHA256SUMS`: versioned macOS ARM64
+and Windows x64 ZIPs, manifests for both, the Windows installer and its manifest,
 corresponding source, and canonical aliases for the Mac ZIP and Windows setup.
 All downloaded asset hashes and both alias pairs passed verification. The
 source revision in each platform manifest matches the tag.
+
+The download list was then reduced to two files at the user's request:
+`FAHSaver-Setup.exe` and `FAHSaver-macos-arm64-v1.0.0.zip`. Both retain the exact
+tested bytes. The extra archives, manifests and checksums remain internal build
+verification artefacts. Corresponding source remains available at the release
+tag and through GitHub's automatic source archives.
 
 Checks completed for this draft:
 
