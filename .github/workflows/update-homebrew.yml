@@ -1,0 +1,76 @@
+name: Update Homebrew cask
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published stable tag, for example v1.0.0
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    secrets:
+      TAP_DEPLOY_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-tap
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: >-
+      github.repository == 'le0-VV/FAH-saver' &&
+      (github.event_name != 'release' ||
+       (!github.event.release.draft && !github.event.release.prerelease))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+    steps:
+      - name: Check tap credential
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo 'TAP_DEPLOY_KEY must contain the dedicated write key for homebrew-fah-saver.' >&2
+            exit 1
+          fi
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - name: Test updater
+        run: python3 -m unittest discover -s source/tests -p test_update_homebrew.py
+      - name: Check out tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: le0-VV/homebrew-fah-saver
+          ref: main
+          path: tap
+          ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
+      - name: Verify release and update cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 source/tools/update-homebrew.py --tag "$RELEASE_TAG" --cask tap/Casks/fah-saver.rb
+      - name: Publish tap update
+        working-directory: tap
+        run: |
+          git add -- Casks/fah-saver.rb
+          if git diff --cached --quiet; then
+            echo 'The tap is already up to date.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "chore(cask): update FAH Saver to $RELEASE_TAG"
+          git push origin HEAD:main
