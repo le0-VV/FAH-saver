@@ -678,3 +678,127 @@ PC access and testing were paused while the user gamed. The completed cleanup
 audit found no test processes or temporary tasks remaining, and the temporary
 LAN and Tailscale SSH tunnels were closed. The user then explicitly released the
 PC with “done gaming”; bounded development checks have resumed.
+
+
+## Unmapped memory attribution follow-up, 17 November 2026
+
+The dominant unexplained charge is now identified with high confidence as internal
+GPU-driver geometry working memory. Apple's allocation inspector names the large
+resources **Parameter Page List Backing**. This is stronger evidence than the
+previous inference from command concurrency alone. It is not an object-by-object
+byte reconciliation of the historical 650.9 MiB peak.
+
+### Allocation names and real-host evidence
+
+The Apple-signed command below exposes GPU allocation descriptions that the generic
+`footprint` category does not show. Run it outside the sandbox, explicitly native:
+
+```sh
+/usr/bin/arch -arm64 /usr/bin/IOAccelMemory --pid PID --one-line
+```
+
+This read-only query took roughly 30–50 seconds because it also waited for
+annotations from unrelated graphics clients. No purge operation was used.
+Do not sum all rows as a physical-footprint total: texture wrappers and IOSurface
+backing can describe the same storage. Its rounded allocation sizes also cannot
+be directly subtracted from a separate process-charge snapshot.
+
+The real host had four `FAHSaverView`/`FAHRenderer`/`MTKView`/`CAMetalLayer`
+instances. A captured process footprint was 1,384.08 MiB, including 1,054.25 MiB
+of generic unmapped memory. All 8,434 dirty objects in that category were wired
+128 KiB objects. The GPU inspector listed eight large Parameter Page List Backing
+resources, approximately 150–174 MiB each. These are asynchronous samples, not an
+atomic allocation ledger. The approximate 1,344.3 MiB sum of those named resource
+sizes must not be treated as an unexplained residual against the 1,054.25 MiB
+process charge.
+
+The cached work unit had changed since the earlier benchmark. The current model
+contained 17,933 atoms, 17,736 bonds and one frame; its JSON payload was 1,491,349
+bytes. The old comparison fixture contained 5,894 atoms. The sphere mesh has 352
+triangles per atom, so the current space-filling model submits 6,312,416 atom
+triangles per frame per renderer. Small shared input meshes therefore do not
+imply small transformed-geometry working memory.
+
+A native, all-processes Metal System Trace succeeded without attaching to the
+protected host. Its PID-filtered events corroborate the driver allocation path:
+
+- 19,911 driver memory events included 16,243 successful 128 KiB wire requests
+  and 2,748 128 KiB unwire requests. Requests can concern the same memory more
+  than once; these cumulative counts are not unique allocated objects.
+- The 37 explicit Metal resource events covered static mesh buffers, model
+  buffers, display drawables and Core Animation resources. Three model buffers
+  were exactly 1,434,640 bytes each: 17,933 instances times 80 bytes. Their
+  backtraces reached `FAHRenderer updateSceneAtTime:`, `renderToTexture:`,
+  `drawInMTKView:` and `FAHSaverView animateOneFrame`.
+- The large Parameter Page List Backing resources were not explicit application
+  Metal resource events. The derived kernel-resource-allocation table had no
+  rows. Driver wire events did not expose an allocation ID that could join each
+  charged VM object to an individual named backing resource.
+
+Apple's installed `GPUCounterGraph.plist` maps
+`ParameterBufferPrimitiveBlockAlloc` to Tiled Vertex Buffer primitive-block bytes,
+including indexed primitives, transformed vertex data and vertex-format data.
+`ParameterBufferBytesUsed` also includes per-tile primitive visibility. Apple's
+[GPU architecture explanation](https://developer.apple.com/videos/play/wwdc2020/10602/)
+describes this geometry intermediate storage between tiling and rendering.
+Together, the resource names, trace events and controls identify the main
+allocation class. The exact charge for each named backing object remains
+unresolved; the samples use different times and accounting views.
+
+### Geometry and concurrency controls
+
+These windowless probes used the production renderer, one 2880x1800 renderer,
+three IOSurface-backed colour targets, per-draw autorelease pools and bounded
+pending commands. The first four rows retained the same complete 5,894-atom
+capture, CPU scene and instance buffers, changing only the atom draw count.
+Every generic dirty object was again a wired 128 KiB object.
+
+| Atoms drawn, one pending command | Generic unmapped charge |
+| --- | ---: |
+| 0 | 5.00 MiB |
+| 1,000 | 12.00 MiB |
+| 3,000 | 25.25 MiB |
+| 5,894 | 43.625 MiB |
+
+With the current 17,933-atom fixture, one pending command produced 113.125 MiB
+of generic unmapped charge and a 195.00 MiB process footprint. Up to three pending
+commands produced 222.125 MiB and a 310.11 MiB footprint. The explicit model and
+colour allocations stayed unchanged. After resource release and two seconds,
+the generic dirty charge was zero and the process footprint was 20.41 MiB.
+These are controlled allocation measurements, not display-presentation tests.
+
+A held but idle renderer was insufficient for the slow GPU inspector: its generic
+charge could fall from 43.625 MiB to zero during the query. A separate continuous-
+render control retained the named parameter backing and the generic charge.
+This prevents interpreting idle cleanup as evidence that the named resource was
+never associated with the rendering workload.
+
+### Profiling and shutdown limits
+
+The command runner for this session was translated (`sysctl.proc_translated=1`).
+An earlier Instruments attempt therefore reported that kernel tracing could not
+run under Rosetta. Profiling commands were changed to explicit ARM64. The earlier
+high-memory screensaver host and the new host both reported `translated=false`;
+the installed saver bundle is arm64. Native own-process Game Memory attachment
+still failed and was excluded. Native all-processes Metal System Trace completed.
+System Integrity Protection remained enabled.
+
+The automatic watcher initially used resident size and missed the full charge;
+the real-host reports above were captured directly by PID. Resident size excludes
+important parts of this unmapped process charge and must not select the profiling
+target by itself.
+
+After the user's confirmed preview exit, the host still used CPU. Closing the
+preview panel and returning Settings to General did not fully stop it. The host
+was terminated after saving its reports, restarted while Settings remained open,
+and was terminated again after Settings quit. A subsequent process check found
+no running legacyScreenSaver host or diagnostic renderer. This ends the observed
+background workload; it does not fix the remaining host lifecycle bug.
+
+Production code and the installed saver were not changed by this investigation.
+The actionable optimisation targets are the sphere geometry, bounded pending GPU
+work, and extra/inactive renderer instances. Raw captures and scratch probes stay
+private under `/private/tmp/fah-unmapped-20261117`; only aggregate evidence is
+recorded here. The exact-byte private-framework helper could not query the kernel
+because it lacked Apple's private allocation-inspection entitlement; it was
+excluded from the results.
