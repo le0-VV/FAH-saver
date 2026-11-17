@@ -41,6 +41,16 @@ add_custom_command(TARGET fah_saver_windows POST_BUILD
         "$<TARGET_FILE_DIR:fah_saver_windows>/nlohmann-json-LICENSE.MIT")
 
 if(BUILD_TESTING)
+    # Run explicitly: this helper temporarily changes current-user screen saver registration.
+    add_executable(fah_windows_installer_lifecycle tests/InstallerLifecycle.cpp)
+    set_target_properties(fah_windows_installer_lifecycle PROPERTIES OUTPUT_NAME "installer-lifecycle")
+    target_compile_features(fah_windows_installer_lifecycle PRIVATE cxx_std_17)
+    target_compile_definitions(fah_windows_installer_lifecycle PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_include_directories(fah_windows_installer_lifecycle PRIVATE "${PROJECT_SOURCE_DIR}/third_party")
+    target_link_libraries(fah_windows_installer_lifecycle PRIVATE advapi32 bcrypt shell32 user32 version)
+    if(NOT MSVC)
+        target_link_options(fah_windows_installer_lifecycle PRIVATE -municode)
+    endif()
     add_executable(fah_windows_options_tests tests/OptionsTests.cpp)
     target_compile_features(fah_windows_options_tests PRIVATE cxx_std_17)
     target_include_directories(fah_windows_options_tests PRIVATE "${PROJECT_SOURCE_DIR}/include")
