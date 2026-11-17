@@ -59,3 +59,15 @@ through `SystemParametersInfoW`; it leaves timeout and security values alone.
 References: [NSIS scripting](https://nsis.sourceforge.io/Docs/Chapter4.html),
 [Windows screen saver registration](https://learn.microsoft.com/en-us/windows/win32/devnotes/scrnsave-exe),
 [SystemParametersInfoW](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow).
+
+
+### Silent failure codes
+
+Silent mode retains specific failure stages for native integration diagnostics:
+2 is a locked managed file; 10–14 are initialisation/platform, mutex, path,
+downgrade and screen-saver-state checks; 20–27 are uninstaller preparation,
+backup-folder creation, backup copy, installation-folder creation, payload copy,
+registration, activation and uninstall-metadata writes; 30–34 are uninstall
+ownership, deactivation, registration removal, file removal and metadata removal.
+An activation/state API error also reports its immediate Windows error code.
+The installer does not substitute a default state when those APIs fail.

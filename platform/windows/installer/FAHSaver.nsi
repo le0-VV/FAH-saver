@@ -66,8 +66,8 @@ Var RollbackFailed
 Var MetadataDir
 Var MetadataVersion
 
-!macro Fail TEXT
-  SetErrorLevel 2
+!macro Fail CODE TEXT
+  SetErrorLevel ${CODE}
   MessageBox MB_OK|MB_ICONSTOP "${TEXT}" /SD IDOK
   Abort
 !macroend
@@ -78,7 +78,7 @@ Var MetadataVersion
   StrCpy $Mutex $0
   ${If} $0 == 0
   ${OrIf} $1 == 183
-    !insertmacro Fail "Another FAH Saver setup or uninstaller is running. Close it and try again."
+    !insertmacro Fail 11 "Another FAH Saver setup or uninstaller is running. Close it and try again."
   ${EndIf}
 !macroend
 
@@ -101,7 +101,7 @@ Var MetadataVersion
   ${If} ${FileExists} "$INSTDIR\${RELATIVE}"
     System::Call 'kernel32::CopyFileW(w "$INSTDIR\${RELATIVE}", w "$PLUGINSDIR\backup\${RELATIVE}", i 1) i.r0'
     ${If} $0 == 0
-      !insertmacro Fail "Setup could not back up the existing FAH Saver files. No files have been replaced."
+      !insertmacro Fail 22 "Setup could not back up the existing FAH Saver files. No files have been replaced."
     ${EndIf}
   ${EndIf}
 !macroend
@@ -110,7 +110,7 @@ Var MetadataVersion
   System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\payload\${RELATIVE}", w "$INSTDIR\${RELATIVE}", i 0) i.r0'
   ${If} $0 == 0
     Call RollbackInstallation
-    !insertmacro Fail "Setup could not update FAH Saver. Close its preview and settings, then try again."
+    !insertmacro Fail 24 "Setup could not update FAH Saver. Close its preview and settings, then try again."
   ${EndIf}
 !macroend
 
@@ -133,7 +133,7 @@ Var MetadataVersion
   ClearErrors
   Delete "$INSTDIR\${RELATIVE}"
   ${If} ${Errors}
-    !insertmacro Fail "FAH Saver could not remove $INSTDIR\${RELATIVE}. Close its preview and settings, then run Uninstall again."
+    !insertmacro Fail 33 "FAH Saver could not remove $INSTDIR\${RELATIVE}. Close its preview and settings, then run Uninstall again."
   ${EndIf}
 !macroend
 
@@ -141,7 +141,7 @@ Function .onInit
   SetShellVarContext current
   SetRegView 64
   ${IfNot} ${RunningX64}
-    !insertmacro Fail "This FAH Saver build requires 64-bit Windows."
+    !insertmacro Fail 10 "This FAH Saver build requires 64-bit Windows."
   ${EndIf}
   !insertmacro AcquireMutex
   GetFullPathName $INSTDIR "$INSTDIR"
@@ -150,14 +150,14 @@ Function .onInit
   ${OrIf} $INSTDIR == "$WINDIR"
   ${OrIf} $INSTDIR == "$SYSDIR"
   ${OrIf} $INSTDIR == "$LOCALAPPDATA"
-    !insertmacro Fail "Choose an application folder for FAH Saver."
+    !insertmacro Fail 12 "Choose an application folder for FAH Saver."
   ${EndIf}
   ReadRegStr $OldInstallDir HKCU "${INSTALL_KEY}" "InstallDir"
   ReadRegStr $OldVersion HKCU "${INSTALL_KEY}" "Version"
   ${If} $OldVersion != ""
     ${VersionCompare} "${FAH_VERSION}" "$OldVersion" $0
     ${If} $0 == 2
-      !insertmacro Fail "A newer FAH Saver version is already installed. Use its setup file to update or repair it."
+      !insertmacro Fail 13 "A newer FAH Saver version is already installed. Use its setup file to update or repair it."
     ${EndIf}
   ${EndIf}
   StrCpy $HadOldSaver 1
@@ -166,9 +166,10 @@ Function .onInit
   ${If} ${Errors}
     StrCpy $HadOldSaver 0
   ${EndIf}
-  System::Call 'user32::SystemParametersInfoW(i 0x10, i 0, *i .r0, i 0) i.r1'
+  System::Call 'user32::SystemParametersInfoW(i 0x10, i 0, *i .r0, i 0) i.r1 ?e'
+  Pop $5
   ${If} $1 == 0
-    !insertmacro Fail "Setup could not read the current screen saver state."
+    !insertmacro Fail 14 "Setup could not read the current screen saver state. Windows error $5."
   ${EndIf}
   StrCpy $OldActive $0
 FunctionEnd
@@ -267,21 +268,21 @@ Section "FAH Saver"
   ClearErrors
   WriteUninstaller "$PLUGINSDIR\payload\Uninstall.exe"
   ${If} ${Errors}
-    !insertmacro Fail "Setup could not prepare its uninstaller."
+    !insertmacro Fail 20 "Setup could not prepare its uninstaller."
   ${EndIf}
   !insertmacro FAH_ManagedFiles Preflight
   ClearErrors
   CreateDirectory "$PLUGINSDIR\backup\shaders"
   CreateDirectory "$PLUGINSDIR\backup\licences"
   ${If} ${Errors}
-    !insertmacro Fail "Setup could not prepare a backup folder."
+    !insertmacro Fail 21 "Setup could not prepare a backup folder."
   ${EndIf}
   !insertmacro FAH_ManagedFiles Backup
   ClearErrors
   CreateDirectory "$INSTDIR\shaders"
   CreateDirectory "$INSTDIR\licences"
   ${If} ${Errors}
-    !insertmacro Fail "Setup cannot write to its installation folder."
+    !insertmacro Fail 23 "Setup cannot write to its installation folder."
   ${EndIf}
   StrCpy $TransactionStarted 1
   !insertmacro FAH_ManagedFiles CopyPayload
@@ -290,19 +291,20 @@ Section "FAH Saver"
   WriteRegStr HKCU "${DESKTOP_KEY}" "SCRNSAVE.EXE" "$INSTDIR\FAHSaver.scr"
   ${If} ${Errors}
     Call RollbackInstallation
-    !insertmacro Fail "Setup could not register FAH Saver for your account."
+    !insertmacro Fail 25 "Setup could not register FAH Saver for your account."
   ${EndIf}
-  System::Call 'user32::SystemParametersInfoW(i 0x11, i 1, p 0, i 3) i.r0'
+  System::Call 'user32::SystemParametersInfoW(i 0x11, i 1, p 0, i 3) i.r0 ?e'
+  Pop $5
   ${If} $0 == 0
     Call RollbackInstallation
-    !insertmacro Fail "Setup could not activate FAH Saver for your account."
+    !insertmacro Fail 26 "Setup could not activate FAH Saver for your account. Windows error $5."
   ${EndIf}
   StrCpy $MetadataDir $INSTDIR
   StrCpy $MetadataVersion "${FAH_VERSION}"
   Call WriteMetadata
   ${If} ${Errors}
     Call RollbackInstallation
-    !insertmacro Fail "Setup could not create the Windows uninstall entry."
+    !insertmacro Fail 27 "Setup could not create the Windows uninstall entry."
   ${EndIf}
   StrCpy $TransactionStarted 0
   StrCpy $RegistrationChanged 0
@@ -364,7 +366,7 @@ Function un.onInit
   GetFullPathName $0 "$0"
   GetFullPathName $INSTDIR "$INSTDIR"
   ${If} $0 != $INSTDIR
-    !insertmacro Fail "This uninstaller does not belong to the registered FAH Saver installation. Use Apps in Windows Settings."
+    !insertmacro Fail 30 "This uninstaller does not belong to the registered FAH Saver installation. Use Apps in Windows Settings."
   ${EndIf}
 FunctionEnd
 
@@ -372,20 +374,21 @@ Section "Uninstall"
   !insertmacro FAH_ManagedFiles Preflight
   Call un.IsCurrentSaver
   ${If} $9 == 1
-    System::Call 'user32::SystemParametersInfoW(i 0x11, i 0, p 0, i 3) i.r0'
+    System::Call 'user32::SystemParametersInfoW(i 0x11, i 0, p 0, i 3) i.r0 ?e'
+  Pop $5
     ${If} $0 == 0
-      !insertmacro Fail "Close the screen saver and unlock Windows, then run Uninstall again."
+      !insertmacro Fail 31 "Close the screen saver and unlock Windows, then run Uninstall again. Windows error $5."
     ${EndIf}
     ClearErrors
     DeleteRegValue HKCU "${DESKTOP_KEY}" "SCRNSAVE.EXE"
     ${If} ${Errors}
-      !insertmacro Fail "FAH Saver could not remove its screen saver registration."
+      !insertmacro Fail 32 "FAH Saver could not remove its screen saver registration."
     ${EndIf}
   ${EndIf}
   !insertmacro FAH_PayloadFiles DeleteManaged
   Call un.RemoveMetadata
   ${If} ${Errors}
-    !insertmacro Fail "FAH Saver could not remove its Windows uninstall entry. Run Uninstall again."
+    !insertmacro Fail 34 "FAH Saver could not remove its Windows uninstall entry. Run Uninstall again."
   ${EndIf}
   !insertmacro DeleteManaged "Uninstall.exe"
   RMDir "$INSTDIR\shaders"
