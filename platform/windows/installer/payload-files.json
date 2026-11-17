@@ -1,0 +1,13 @@
+[
+  "FAHSaver.scr",
+  "shaders/model.vert.spv",
+  "shaders/model.frag.spv",
+  "shaders/background.vert.spv",
+  "shaders/background.frag.spv",
+  "nlohmann-json-LICENSE.MIT",
+  "licences/libcxx-LICENSE.TXT",
+  "licences/libcxxabi-LICENSE.TXT",
+  "licences/libunwind-LICENSE.TXT",
+  "licences/mingw-runtime-COPYING.txt",
+  "licences/zig-compiler-runtime-LICENSE.MIT"
+]
