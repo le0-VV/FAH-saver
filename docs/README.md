@@ -6,6 +6,7 @@ and research sources.
 
 | Topic | Guide |
 | --- | --- |
+| Planned work | [TODO](TODO.md) |
 | Current release and known limits | [1.0.0 release notes](releases/1.0.0.md) |
 | Private LAN and Tailscale connections | [Direct access](direct-access.md) |
 | macOS build and host integration | [macOS guide](../platform/macos/README.md) |
