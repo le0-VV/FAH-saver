@@ -72,6 +72,10 @@ ownership, deactivation, registration removal, file removal and metadata removal
 An activation/state API error also reports its immediate Windows error code.
 The installer does not substitute a default state when those APIs fail.
 
+A fresh destination is normalised with the Windows `GetFullPathNameW` API.
+The NSIS instruction of the same name requires an existing filesystem path;
+using it before directory creation can clear the new installation path.
+
 On error, setup writes `%TEMP%\FAHSaver-Setup.log` in UTF-16. It contains the
 failure stage, immediate native error where available, affected relative file,
 source/destination and installer folders. The copy diagnostic is saved before

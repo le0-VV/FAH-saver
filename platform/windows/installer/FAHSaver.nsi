@@ -176,7 +176,18 @@ Function .onInit
     !insertmacro Fail 10 "This FAH Saver build requires 64-bit Windows."
   ${EndIf}
   !insertmacro AcquireMutex
-  GetFullPathName $INSTDIR "$INSTDIR"
+  ${If} $INSTDIR == ""
+    !insertmacro Fail 12 "Setup needs an installation folder."
+  ${EndIf}
+  ; NSIS GetFullPathName requires an existing path and clears a new destination.
+  System::Call 'kernel32::GetFullPathNameW(w "$INSTDIR", i ${NSIS_MAX_STRLEN}, w .r0, p 0) i.r1 ?e'
+  Pop $5
+  ${If} $1 == 0
+  ${OrIf} $1 >= ${NSIS_MAX_STRLEN}
+    StrCpy $FailureWindowsError $5
+    !insertmacro Fail 12 "Setup could not resolve its installation folder."
+  ${EndIf}
+  StrCpy $INSTDIR $0
   ${GetRoot} "$INSTDIR" $0
   ${If} $INSTDIR == "$0\"
   ${OrIf} $INSTDIR == "$WINDIR"
