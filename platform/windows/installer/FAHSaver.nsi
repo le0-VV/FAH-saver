@@ -65,10 +65,25 @@ Var RegistrationChanged
 Var RollbackFailed
 Var MetadataDir
 Var MetadataVersion
+Var FailureText
+Var FailureWindowsError
+Var FailureFile
+Var FailureSource
+Var FailureDestination
 
 !macro Fail CODE TEXT
+  StrCpy $FailureText "${TEXT}"
+  ; Error-only diagnostic: installer paths and native error codes, never user preferences.
+  Push $R9
+  ClearErrors
+  FileOpen $R9 "$TEMP\FAHSaver-Setup.log" w
+  ${IfNot} ${Errors}
+    FileWriteUTF16LE /BOM $R9 "FAH Saver ${FAH_VERSION}$\r$\nStage=${CODE}$\r$\nMessage=$FailureText$\r$\nWindowsError=$FailureWindowsError$\r$\nFile=$FailureFile$\r$\nSource=$FailureSource$\r$\nDestination=$FailureDestination$\r$\nInstallDir=$INSTDIR$\r$\nPluginsDir=$PLUGINSDIR$\r$\n"
+    FileClose $R9
+  ${EndIf}
+  Pop $R9
   SetErrorLevel ${CODE}
-  MessageBox MB_OK|MB_ICONSTOP "${TEXT}" /SD IDOK
+  MessageBox MB_OK|MB_ICONSTOP "$FailureText$\r$\n$\r$\nDiagnostic: $TEMP\FAHSaver-Setup.log" /SD IDOK
   Abort
 !macroend
 
@@ -78,6 +93,7 @@ Var MetadataVersion
   StrCpy $Mutex $0
   ${If} $0 == 0
   ${OrIf} $1 == 183
+    StrCpy $FailureWindowsError $1
     !insertmacro Fail 11 "Another FAH Saver setup or uninstaller is running. Close it and try again."
   ${EndIf}
 !macroend
@@ -86,11 +102,14 @@ Var MetadataVersion
   !define /redef LOCK_LABEL "lock_${__LINE__}"
   ${LOCK_LABEL}:
   ${If} ${FileExists} "$INSTDIR\${RELATIVE}"
-    System::Call 'kernel32::CreateFileW(w "$INSTDIR\${RELATIVE}", i 0x40000000, i 3, p 0, i 3, i 0, p 0) p.r0'
+    System::Call 'kernel32::CreateFileW(w "$INSTDIR\${RELATIVE}", i 0x40000000, i 3, p 0, i 3, i 0, p 0) p.r0 ?e'
+    Pop $5
     ${If} $0 == -1
       MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Close FAH Saver and Screen Saver Settings, then click Retry. Setup cannot update or remove $INSTDIR\${RELATIVE}." /SD IDCANCEL IDRETRY ${LOCK_LABEL}
-      SetErrorLevel 2
-      Abort
+      StrCpy $FailureWindowsError $5
+      StrCpy $FailureFile "${RELATIVE}"
+      StrCpy $FailureDestination "$INSTDIR\${RELATIVE}"
+      !insertmacro Fail 2 "A managed FAH Saver file is locked or not writable."
     ${EndIf}
     System::Call 'kernel32::CloseHandle(p r0)'
   ${EndIf}
@@ -99,18 +118,29 @@ Var MetadataVersion
 
 !macro Backup RELATIVE
   ${If} ${FileExists} "$INSTDIR\${RELATIVE}"
-    System::Call 'kernel32::CopyFileW(w "$INSTDIR\${RELATIVE}", w "$PLUGINSDIR\backup\${RELATIVE}", i 1) i.r0'
+    System::Call 'kernel32::CopyFileW(w "$INSTDIR\${RELATIVE}", w "$PLUGINSDIR\backup\${RELATIVE}", i 1) i.r0 ?e'
+    Pop $5
     ${If} $0 == 0
+      StrCpy $FailureWindowsError $5
+      StrCpy $FailureFile "${RELATIVE}"
+      StrCpy $FailureSource "$INSTDIR\${RELATIVE}"
+      StrCpy $FailureDestination "$PLUGINSDIR\backup\${RELATIVE}"
       !insertmacro Fail 22 "Setup could not back up the existing FAH Saver files. No files have been replaced."
     ${EndIf}
   ${EndIf}
 !macroend
 
 !macro CopyPayload RELATIVE
-  System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\payload\${RELATIVE}", w "$INSTDIR\${RELATIVE}", i 0) i.r0'
+  System::Call 'kernel32::CopyFileW(w "$PLUGINSDIR\payload\${RELATIVE}", w "$INSTDIR\${RELATIVE}", i 0) i.r0 ?e'
+  Pop $5
   ${If} $0 == 0
+    StrCpy $FailureWindowsError $5
+    StrCpy $FailureFile "${RELATIVE}"
+    StrCpy $FailureSource "$PLUGINSDIR\payload\${RELATIVE}"
+    StrCpy $FailureDestination "$INSTDIR\${RELATIVE}"
+    StrCpy $FailureText "Setup could not copy ${RELATIVE}. Windows error $FailureWindowsError."
     Call RollbackInstallation
-    !insertmacro Fail 24 "Setup could not update FAH Saver. Close its preview and settings, then try again."
+    !insertmacro Fail 24 "$FailureText"
   ${EndIf}
 !macroend
 
@@ -133,6 +163,8 @@ Var MetadataVersion
   ClearErrors
   Delete "$INSTDIR\${RELATIVE}"
   ${If} ${Errors}
+    StrCpy $FailureFile "${RELATIVE}"
+    StrCpy $FailureDestination "$INSTDIR\${RELATIVE}"
     !insertmacro Fail 33 "FAH Saver could not remove $INSTDIR\${RELATIVE}. Close its preview and settings, then run Uninstall again."
   ${EndIf}
 !macroend
@@ -169,6 +201,7 @@ Function .onInit
   System::Call 'user32::SystemParametersInfoW(i 0x10, i 0, *i .r0, i 0) i.r1 ?e'
   Pop $5
   ${If} $1 == 0
+    StrCpy $FailureWindowsError $5
     !insertmacro Fail 14 "Setup could not read the current screen saver state. Windows error $5."
   ${EndIf}
   StrCpy $OldActive $0
@@ -296,6 +329,7 @@ Section "FAH Saver"
   System::Call 'user32::SystemParametersInfoW(i 0x11, i 1, p 0, i 3) i.r0 ?e'
   Pop $5
   ${If} $0 == 0
+    StrCpy $FailureWindowsError $5
     Call RollbackInstallation
     !insertmacro Fail 26 "Setup could not activate FAH Saver for your account. Windows error $5."
   ${EndIf}
@@ -375,8 +409,9 @@ Section "Uninstall"
   Call un.IsCurrentSaver
   ${If} $9 == 1
     System::Call 'user32::SystemParametersInfoW(i 0x11, i 0, p 0, i 3) i.r0 ?e'
-  Pop $5
+    Pop $5
     ${If} $0 == 0
+      StrCpy $FailureWindowsError $5
       !insertmacro Fail 31 "Close the screen saver and unlock Windows, then run Uninstall again. Windows error $5."
     ${EndIf}
     ClearErrors
