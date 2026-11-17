@@ -89,6 +89,9 @@ The build creates `build/platform/macos/FAHSaver.saver`, a native preview and a
 capture tool. It does not install or select the system screensaver. See the
 [macOS instructions](platform/macos/README.md) and
 [Windows instructions](platform/windows/README.md) for platform-specific runs.
+Windows releases provide a per-user Setup.exe that handles installation,
+registration, updates and uninstallation. The downloaded setup file can be
+deleted after installation. See the [installer instructions](platform/windows/installer/README.md).
 Windows development builds need a C++17 toolchain, Windows headers and Vulkan
 SDK tools. Windows cancellation tests also use Python 3. Browser data tests use
 Node.js; the screensavers do not need Node.js.

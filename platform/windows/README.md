@@ -1,5 +1,28 @@
 # Windows Vulkan host
 
+## Install and update
+
+Run the release's `FAHSaver-Setup-VERSION.exe`. Setup installs FAH Saver for the
+current Windows account in `%LOCALAPPDATA%\Programs\FAH Saver`, selects it as the
+screensaver and adds an uninstall entry to Windows Apps. Administrator access
+is not required. The screensaver list shows **FAH Saver**.
+
+You can delete the downloaded setup file after installation. To update, run the
+new setup; it reuses the managed location and preserves source, frame-rate and
+model-cache settings. Existing saved frame-rate limits override the 24 fps
+default. Setup preserves the Windows idle timeout and password settings.
+
+The Finish page can open FAH Saver's options. Windows Screen Saver Settings
+provides the Preview and Wait controls. Uninstall removes managed files and
+clears the selected saver only if it still points to this installation. Another
+selected saver, user preferences, cached models and unknown files are retained.
+
+The portable ZIP remains available for development and manual testing. Keep its
+`shaders` directory beside the executable. See the [installer build and test
+instructions](installer/README.md) to create Setup.exe.
+
+## Developer builds and tests
+
 The host builds a native `FAHSaver.scr` and an identical `fah-preview.exe`
 standalone harness. It does not install or activate the screensaver.
 Keep the `shaders` directory beside the executable.

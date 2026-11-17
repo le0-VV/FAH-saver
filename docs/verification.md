@@ -827,3 +827,76 @@ Executable SHA256 for both `FAHSaver.scr` and `fah-preview.exe`:
 `c2446e8935a133be7a4730d1bbe75a07a0b0ca2df9eec11168fbf15430fb0bf7`.
 The PC installation has not been replaced by the agent; the package includes
 instructions to replace files in the existing installation folder.
+
+
+## Windows name and managed installer, 17 November 2026
+
+Windows 0.1.10 supplies the exact screen-saver description **FAH Saver** through
+neutral-language string-table ordinal 1, and FileDescription/ProductName version
+resources. The stable filename remains `FAHSaver.scr`. Resource extraction on the
+Mac and native Windows LoadStringW/GetFileVersionInfo checks confirmed the name
+and 0.1.10 version without starting the renderer.
+
+The recommended Windows delivery is now a single per-user NSIS Setup.exe. It
+installs and registers the saver in `%LOCALAPPDATA%\Programs\FAH Saver`, supports
+rerunning setup for updates, and adds a Windows Apps uninstall entry. A user can
+delete the downloaded setup after installation. The runtime default remains
+24 fps; saved values take precedence. Settings and cached models are retained.
+Uninstall removes known managed files only and changes the selected screensaver
+only if it still identifies this installation, including quoted and 8.3 paths.
+
+All five packaging tests passed, including a real NSIS 3.13 compilation with
+warnings treated as errors and source/output paths containing spaces and `$`.
+The checked payload includes the x64 saver, four validated shaders and six
+licence notices. Independent extraction verified the embedded payload hashes.
+No developer preview executable or background updater is installed.
+
+The exact setup bytes were tested natively on the PC in the logged-on user
+session through a temporary task configured for least privilege. All eight
+checks passed:
+
+- Fresh installation, the name/version resources, registration and Apps entry.
+- Installing from a spaced download filename, deleting that setup copy, and
+  reading the installed resources afterwards.
+- Rerunning the same version with unchanged payload and saved settings.
+- A locked saver file produces exit 2 without file or registration changes.
+- Uninstall recognises an owned long path.
+- Uninstall recognises an owned 8.3 path.
+- Uninstall recognises an owned quoted 8.3 path.
+- Uninstall preserves another selected saver and an arbitrary user file.
+
+Preferences and cache hashes matched before/after. The helper restored the
+original four Desktop values and installer/Apps metadata; an independent check
+confirmed the original selection, 600-second timeout, saved 24 fps limit and
+Restricted script policy. The temporary task, fixture and staged executables
+were removed, with no owned test processes remaining. No rendering, FAH client
+restart, network or security-policy changes were part of these checks.
+
+Native testing rejected early candidates before distribution. NSIS's
+GetFullPathName instruction cleared a destination that did not exist yet. The
+installer now uses checked Win32 GetFullPathNameW and rejects empty or oversized
+paths. The rejected tests created and removed three copies of our saver at the
+current-drive root; a read-only NTFS journal check covering all tests confirmed
+those creation/deletion cycles and no events for the other affected root
+filenames. No matching root files or directories remained. The fresh-directory
+native test is the regression check for this fault.
+
+After the path correction, an SSH Session 0 test reached activation but returned
+Windows error 1459 (an interactive window station is required). It restored the
+original state. The unchanged installer then passed all checks in the logged-on
+user session. No registry-only activation fallback or script-policy override was
+introduced.
+
+Setup SHA256:
+`900c18b6bfe383a45a4fe259dafc091e4c84751df4228383850997b8d63d9d52`.
+Saver/preview SHA256:
+`3fef40eaf1b530139d21c5c04ae8aa9bc12c65905438b54d87013d86ec801c64`.
+The delivered setup is a byte-for-byte copy of the tested candidate. Raw native
+reports, recovery records and journal inspection remain private under
+`/private/tmp/fah-installer-native-20261117-f6173a8f`.
+
+The setup is unsigned. The visible wizard, downloaded-file trust prompts and
+MSVC build were not manually tested. These checks validate native installer
+behaviour, not a new GPU-performance or model-rendering benchmark. The PC's
+previous installation was restored; the user can now run the new setup to move
+to the managed installation.
