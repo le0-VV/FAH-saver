@@ -802,3 +802,28 @@ private under `/private/tmp/fah-unmapped-20261117`; only aggregate evidence is
 recorded here. The exact-byte private-framework helper could not query the kernel
 because it lacked Apple's private allocation-inspection entitlement; it was
 excluded from the results.
+
+
+## Windows 24 fps default package, 17 November 2026
+
+Windows 0.1.9 was built from `b0bfee276e1575d3fbff2cd357668648086af3d3`,
+including the default change in `121445b`. Relative to the user's working 0.1.8
+runtime sources, the Windows behaviour change is the default limit from 60 to
+24 fps; the version label also changes to 0.1.9. Saved limits and explicit
+`--fps` arguments remain authoritative.
+
+The portable options checks passed for default 24, explicit 60 and preservation
+of a saved 30 fps limit. The Windows parser executable cross-built. Both GUI
+aliases are byte-identical x64 PE executables, the version label and imports were
+checked, and all four shaders passed SPIR-V validation. Root verified all 26
+source-input hashes, executable and licence hashes, unchanged DLL imports,
+ZIP CRC and every payload hash. No new-version Windows runtime test was run;
+the user confirmed the previous 0.1.8 preview and installed screensaver worked.
+
+The versioned ZIP is `build/deliverables/FAHSaver-windows-x64-v0.1.9.zip`;
+the canonical Windows ZIP now contains the same package. Archive SHA256:
+`d004de1e1945ffdc22e7991f43dad8663bbd54a833c94f16d764cbf31f527af8`.
+Executable SHA256 for both `FAHSaver.scr` and `fah-preview.exe`:
+`c2446e8935a133be7a4730d1bbe75a07a0b0ca2df9eec11168fbf15430fb0bf7`.
+The PC installation has not been replaced by the agent; the package includes
+instructions to replace files in the existing installation folder.
