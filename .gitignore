@@ -3,3 +3,5 @@
 /results/
 .DS_Store
 *.user
+__pycache__/
+*.py[cod]

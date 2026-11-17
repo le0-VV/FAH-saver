@@ -3,13 +3,60 @@
 A protein-model screensaver for macOS and Windows. The screensaver can display
 the active Folding@home work unit (WU) from the same computer or another computer.
 
-Status: runnable native prototypes and performance investigation. The macOS
-Metal module, Windows Vulkan host, native FAH connection layer and WebGL
-comparison renderer are implemented. Performance acceptance and system-host
-validation are still in progress.
+Version **1.0.0** provides a native Metal screensaver for Apple-silicon Macs and
+a native Vulkan screensaver with a per-user installer for Windows x64. The
+default display limit is 24 fps. An independent WebGL comparison renderer is
+included for development.
+
+This is an independent project, not an official Folding@home product.
+
+## Install
+
+On an Apple-silicon Mac with Homebrew:
+
+```sh
+brew install --cask le0-VV/fah-saver/fah-saver
+```
+
+Select **FAH Saver** in macOS Screen Saver settings and configure the FAH source
+in Options. If an older copy was installed manually in `/Library/Screen Savers`,
+remove that copy before switching to Homebrew's per-user installation.
+
+For manual macOS installation, download the
+[Apple-silicon ZIP](https://github.com/le0-VV/FAH-saver/releases/latest/download/FAHSaver-macos-arm64.zip)
+and open `FAHSaver.saver`.
+
+On Windows, download and run
+[FAH Saver Setup.exe](https://github.com/le0-VV/FAH-saver/releases/latest/download/FAHSaver-Setup.exe).
+Setup handles the permanent location, screensaver registration and updates.
+You can delete the download after installation. To update, run the next setup;
+existing preferences and cached models are preserved.
+
+When FAH runs on the same machine, the source is
+`ws://127.0.0.1:7396/api/websocket`. For another folding machine, use its private
+LAN or Tailscale address and follow the [direct-access instructions](docs/direct-access.md).
+
+## Release limitations
+
+- macOS downloads support Apple silicon; an Intel build has not been verified.
+- The macOS saver is ad hoc signed and is not notarised. The Windows installer
+  is unsigned. Platform trust approval may be required for downloaded binaries.
+- The macOS legacy host can retain extra or inactive renderers after a Settings
+  preview, causing continued GPU use and substantial memory use. This remains
+  unresolved; 1.0.0 does not claim an optimal active or inactive footprint.
+- Windows currently spans one surface across the virtual desktop rather than
+  providing independent scenes per display.
 
 See the [verification record](docs/verification.md) for measured results and
 their limits.
+
+## Licence
+
+FAH Saver's original code is licensed under **GPL-3.0-or-later**. See
+[LICENSE](LICENSE), [COPYRIGHT](COPYRIGHT) and the
+[third-party notices](THIRD-PARTY-NOTICES.md). Third-party components retain
+their own licences. Release source and build instructions are published in this
+repository alongside each version tag.
 
 ## Agreed requirements
 
