@@ -35,7 +35,9 @@ snapshots every 1 second by default. Use `--snapshot-interval SECONDS` for a
 finite interval of at least 0.05 seconds, with no imposed upper limit. Existing
 saved intervals remain unchanged. Latest mode ignores this cadence.
 Display frame rate is independent.
-`--fps` accepts integers from 1 to 240. No model is substituted when data is
+The frame-rate limit defaults to 24 fps. `--fps` accepts integers from 1 to 240;
+explicit command-line values and saved preferences override the default.
+No model is substituted when data is
 unavailable and no saved model exists; the host displays connection or
 configuration status instead.
 Live loop retention fails explicitly at 128 MiB of coordinates or 100,000
