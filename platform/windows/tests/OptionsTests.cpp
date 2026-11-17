@@ -58,7 +58,7 @@ int main() {
     check(!parseOptions({"--fullscreen", "false"}).fullscreen);
     const auto size = parseOptions({"--width","1920","--height","1080"});
     check(size.width == 1920 && size.height == 1080);
-    check(parseOptions({"--source", "ws://localhost:7396/api/websocket"}).fps == 60);
+    check(parseOptions({"--source", "ws://localhost:7396/api/websocket"}).fps == 24);
     Options saved; saved.source = "ws://localhost:7396/api/websocket";
     check(parseOptions({"--capture", "file.json"},saved).source.empty());
     saved.source.clear(); saved.capture = "file.json";

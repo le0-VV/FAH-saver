@@ -73,7 +73,7 @@ renderer instances and is not a complete process-footprint measurement.
 ## Screensaver options and checks
 
 The native options sheet selects a live source URL, optional WU ID,
-latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit and a light
+latest or loop playback, a fixed/cycling/random style, a 1–240 fps limit (default 24 fps) and a light
 sky/grid, dark sky/grid or solid-colour background. The loop interval field is
 visible only in loop mode and defaults to 1 second for new settings. Existing
 explicit values are preserved. The field accepts ASCII digits and one decimal

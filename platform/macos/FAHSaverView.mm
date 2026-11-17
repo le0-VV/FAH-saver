@@ -154,7 +154,7 @@ static void cacheError(const std::string& message) {
     self.wantsLayer = YES;
     _defaults = preferences ? preferences : [ScreenSaverDefaults defaultsForModuleWithName:FAHDefaultsName];
     [_defaults registerDefaults:@{ @"sourceURL": @"ws://127.0.0.1:7396/api/websocket", @"unit": @"",
-        @"loop": @NO, @"style": @0, @"fps": @60,
+        @"loop": @NO, @"style": @0, @"fps": @24,
         @"sky": @YES, @"darkSky": @NO, @"snapshotInterval": @1,
         @"red": @.02, @"green": @.025, @"blue": @.035 }];
     NSError *error = nil;

@@ -5,7 +5,7 @@
 enum class FAHStyleMode { Fixed, Cycle, Random };
 
 struct FAHRenderOptions {
-    int fps = 60;
+    int fps = 24;
     fah::Style style = fah::Style::SpaceFilling;
     FAHStyleMode styleMode = FAHStyleMode::Fixed;
     bool loop = false;

@@ -23,7 +23,7 @@ their limits.
 | Startup and offline display | Automatically cache one latest complete model for the selected source; show it while live data is unavailable. |
 | Model styles | The current FAH viewer's three styles: space-filling, ball-and-stick and sticks. |
 | Style selection | Keep one style, cycle through all three, or select styles at random. |
-| Frame rate | Ship with a 60 fps target and a user-configurable frame-rate limit. |
+| Frame rate | Default to 24 fps with a user-configurable limit from 1 to 240 fps. |
 | Backgrounds | Offer background options. Do not restrict the screensaver to black. |
 | Performance | Prefer native networking and GPU rendering. Compare them against an embedded browser before selecting the stack. |
 

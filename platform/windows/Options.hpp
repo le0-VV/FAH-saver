@@ -14,7 +14,7 @@ struct Options {
     std::string source;
     std::string unit;
     std::string metrics;
-    unsigned fps = 60;
+    unsigned fps = 24;
     unsigned width = 1280,height = 720;
     double seconds = 0;
     int style = 1; // 4 cycles styles; 5 selects them at random.
