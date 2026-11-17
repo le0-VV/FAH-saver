@@ -1,5 +1,9 @@
 [
   "FAHSaver.scr",
+  "LICENSE",
+  "COPYRIGHT",
+  "THIRD-PARTY-NOTICES.md",
+  "SOURCE.txt",
   "shaders/model.vert.spv",
   "shaders/model.frag.spv",
   "shaders/background.vert.spv",
@@ -9,5 +13,13 @@
   "licences/libcxxabi-LICENSE.TXT",
   "licences/libunwind-LICENSE.TXT",
   "licences/mingw-runtime-COPYING.txt",
-  "licences/zig-compiler-runtime-LICENSE.MIT"
+  "licences/zig-compiler-runtime-LICENSE.MIT",
+  "licences/LGPL-2.1.txt",
+  "licences/NSIS-COPYING.txt",
+  "licences/NSIS-Modern-UI-LICENSE.txt",
+  "licences/Vulkan-Headers-LICENSE.md",
+  "licences/Vulkan-Headers-MIT.txt",
+  "licences/mingw-DISCLAIMER.PD",
+  "licences/mingw-gdtoa-LICENSE.txt",
+  "licences/winhttp-header-NOTICE.txt"
 ]

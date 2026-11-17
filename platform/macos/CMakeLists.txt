@@ -27,9 +27,16 @@ set_target_properties(FAHSaver PROPERTIES
     PREFIX ""
     OUTPUT_NAME "FAHSaver"
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+configure_file("${PROJECT_SOURCE_DIR}/cmake/SOURCE.txt.in" "${CMAKE_CURRENT_BINARY_DIR}/SOURCE.txt" @ONLY)
+set(FAH_RELEASE_NOTICES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/COPYRIGHT"
+    "${PROJECT_SOURCE_DIR}/THIRD-PARTY-NOTICES.md" "${CMAKE_CURRENT_BINARY_DIR}/SOURCE.txt")
+set_property(TARGET FAHSaver APPEND PROPERTY LINK_DEPENDS ${FAH_RELEASE_NOTICES}
+    "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT")
 add_custom_command(TARGET FAHSaver POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/web"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${FAH_RELEASE_NOTICES}
+        "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
         "$<TARGET_BUNDLE_DIR:FAHSaver>/Contents/Resources/nlohmann-json-LICENSE.MIT")
 

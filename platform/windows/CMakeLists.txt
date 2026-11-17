@@ -8,6 +8,9 @@ find_package(Vulkan REQUIRED)
 find_program(FAH_GLSLANG_VALIDATOR NAMES glslangValidator HINTS "$ENV{VULKAN_SDK}/Bin" REQUIRED)
 
 configure_file(Resources.rc.in "${CMAKE_CURRENT_BINARY_DIR}/Resources.rc" @ONLY)
+configure_file("${PROJECT_SOURCE_DIR}/cmake/SOURCE.txt.in" "${CMAKE_CURRENT_BINARY_DIR}/SOURCE.txt" @ONLY)
+set(FAH_RELEASE_NOTICES "${PROJECT_SOURCE_DIR}/LICENSE" "${PROJECT_SOURCE_DIR}/COPYRIGHT"
+    "${PROJECT_SOURCE_DIR}/THIRD-PARTY-NOTICES.md" "${CMAKE_CURRENT_BINARY_DIR}/SOURCE.txt")
 add_executable(fah_saver_windows WIN32 Main.cpp Renderer.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/Resources.rc")
 set_target_properties(fah_saver_windows PROPERTIES OUTPUT_NAME FAHSaver SUFFIX ".scr")
@@ -37,6 +40,10 @@ add_custom_command(TARGET fah_saver_windows POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_CURRENT_BINARY_DIR}/compiled-shaders" "$<TARGET_FILE_DIR:fah_saver_windows>/shaders"
     COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:fah_saver_windows>" "$<TARGET_FILE_DIR:fah_saver_windows>/fah-preview.exe")
 add_custom_command(TARGET fah_saver_windows POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${FAH_RELEASE_NOTICES}
+        "$<TARGET_FILE_DIR:fah_saver_windows>"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/third_party/licenses"
+        "$<TARGET_FILE_DIR:fah_saver_windows>/licences"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT"
         "$<TARGET_FILE_DIR:fah_saver_windows>/nlohmann-json-LICENSE.MIT")
 
@@ -62,4 +69,6 @@ endif()
 
 install(TARGETS fah_saver_windows RUNTIME DESTINATION .)
 install(FILES ${FAH_SHADERS} DESTINATION shaders)
-install(FILES "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT" DESTINATION licences RENAME nlohmann-json-LICENSE.MIT)
+install(FILES ${FAH_RELEASE_NOTICES} DESTINATION .)
+install(FILES "${PROJECT_SOURCE_DIR}/third_party/nlohmann/LICENSE.MIT" DESTINATION . RENAME nlohmann-json-LICENSE.MIT)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/third_party/licenses/" DESTINATION licences)

@@ -1,6 +1,6 @@
 Unicode true
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
+SetCompressor /SOLID zlib
 CRCCheck force
 AllowRootDirInstall false
 AllowSkipFiles off

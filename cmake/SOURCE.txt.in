@@ -1,0 +1,10 @@
+FAH Saver @PROJECT_VERSION@
+
+Corresponding source code and build/installation instructions:
+https://github.com/le0-VV/FAH-saver/tree/v@PROJECT_VERSION@
+
+Source archive:
+https://github.com/le0-VV/FAH-saver/archive/refs/tags/v@PROJECT_VERSION@.tar.gz
+
+Licence: GNU GPL version 3 or (at your option) any later version.
+See LICENSE, COPYRIGHT and THIRD-PARTY-NOTICES.md in this distribution.

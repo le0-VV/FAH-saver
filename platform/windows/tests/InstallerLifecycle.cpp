@@ -26,11 +26,31 @@ constexpr wchar_t markerName[] = L".fah-installer-test";
 constexpr char markerText[] = "FAH Saver installer lifecycle fixture v1\n";
 const std::array<const wchar_t*, 4> desktopValues{
     L"SCRNSAVE.EXE", L"ScreenSaveActive", L"ScreenSaveTimeOut", L"ScreenSaverIsSecure"};
-const std::array<const wchar_t*, 12> managedFiles{
-    L"FAHSaver.scr", L"Uninstall.exe", L"shaders\\model.vert.spv", L"shaders\\model.frag.spv",
-    L"shaders\\background.vert.spv", L"shaders\\background.frag.spv", L"nlohmann-json-LICENSE.MIT",
-    L"licences\\libcxx-LICENSE.TXT", L"licences\\libcxxabi-LICENSE.TXT", L"licences\\libunwind-LICENSE.TXT",
-    L"licences\\mingw-runtime-COPYING.txt", L"licences\\zig-compiler-runtime-LICENSE.MIT"};
+const std::array<const wchar_t*, 24> managedFiles{
+    L"FAHSaver.scr",
+    L"Uninstall.exe",
+    L"LICENSE",
+    L"COPYRIGHT",
+    L"THIRD-PARTY-NOTICES.md",
+    L"SOURCE.txt",
+    L"shaders\\model.vert.spv",
+    L"shaders\\model.frag.spv",
+    L"shaders\\background.vert.spv",
+    L"shaders\\background.frag.spv",
+    L"nlohmann-json-LICENSE.MIT",
+    L"licences\\libcxx-LICENSE.TXT",
+    L"licences\\libcxxabi-LICENSE.TXT",
+    L"licences\\libunwind-LICENSE.TXT",
+    L"licences\\mingw-runtime-COPYING.txt",
+    L"licences\\zig-compiler-runtime-LICENSE.MIT",
+    L"licences\\LGPL-2.1.txt",
+    L"licences\\NSIS-COPYING.txt",
+    L"licences\\NSIS-Modern-UI-LICENSE.txt",
+    L"licences\\Vulkan-Headers-LICENSE.md",
+    L"licences\\Vulkan-Headers-MIT.txt",
+    L"licences\\mingw-DISCLAIMER.PD",
+    L"licences\\mingw-gdtoa-LICENSE.txt",
+    L"licences\\winhttp-header-NOTICE.txt"};
 
 static void require(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
