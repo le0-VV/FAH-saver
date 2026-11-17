@@ -101,6 +101,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$RELEASE_TAG" --verify-tag --draft \
-            --title "FAH Saver $RELEASE_TAG" --generate-notes release-assets/*
+            --title "FAH Saver $RELEASE_TAG" --generate-notes \
+            release-assets/FAHSaver-Setup.exe \
+            "release-assets/FAHSaver-macos-arm64-${RELEASE_TAG}.zip"
           # Publish the reviewed draft with a user-authenticated GitHub action.
           # Its release:published event then runs update-homebrew.yml.

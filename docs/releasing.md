@@ -70,9 +70,34 @@ Do not use these options to substitute a different toolchain.
 
 ## Release assets
 
-For version `1.0.0`, the release contains these files:
+The GitHub draft or published release exposes only these two uploaded downloads:
 
-| Asset | Contents |
+| Download | Contents |
+| --- | --- |
+| `FAHSaver-macos-arm64-v1.0.0.zip` | macOS ARM64 `FAHSaver.saver` bundle and manifest |
+| `FAHSaver-Setup.exe` | Per-user Windows x64 installer |
+
+The Mac ZIP filename includes the release tag. Homebrew keeps its existing
+versioned, tag-pinned download contract, for example
+`https://github.com/le0-VV/FAH-saver/releases/download/v1.0.0/FAHSaver-macos-arm64-v1.0.0.zip`,
+and records that download's SHA-256. Windows uses the canonical
+`FAHSaver-Setup.exe` filename in each release.
+
+Corresponding source and build scripts remain in the public tagged repository.
+GitHub also provides its automatic **Source code (zip)** and **Source code (tar.gz)**
+links for the tag.
+
+### Internal CI verification files
+
+The packaging script still creates and verifies the full set below. The
+`release-assets` Actions artifact retains these files for acceptance checks and
+provenance. Only the two platform downloads above are uploaded to the GitHub
+release; the other packages, standalone manifests, source archive and checksums
+stay in the CI artifact.
+
+For version `1.0.0`, the internal output contains:
+
+| File | Contents |
 | --- | --- |
 | `FAHSaver-macos-arm64-v1.0.0.zip` | `FAHSaver.saver` at the archive root and `manifest.json` |
 | `FAHSaver-macos-arm64-v1.0.0.manifest.json` | Bundle file hashes, source revision and platform information |
