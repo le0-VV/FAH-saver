@@ -12,6 +12,9 @@ This is an independent project, not an official Folding@home product.
 
 ## Install
 
+The links and Homebrew command below require a published stable release.
+Draft release assets are available to repository maintainers for review.
+
 On an Apple-silicon Mac with Homebrew:
 
 ```sh

@@ -900,3 +900,52 @@ MSVC build were not manually tested. These checks validate native installer
 behaviour, not a new GPU-performance or model-rendering benchmark. The PC's
 previous installation was restored; the user can now run the new setup to move
 to the managed installation.
+
+## GitHub 1.0.0 draft validation on 17 November 2026
+
+The signed `v1.0.0` tag identifies source commit
+`61e464a8a4d1a952b4b5e1bff738bc1556dd9fb8`. The
+[GitHub build](https://github.com/le0-VV/FAH-saver/actions/runs/44033561902)
+ran through manual workflow dispatch and passed. It created a draft release;
+the user explicitly requested that the release remain unpublished.
+
+The draft contains nine assets and `SHA256SUMS`: versioned macOS ARM64 and
+Windows x64 ZIPs, manifests for both, the Windows installer and its manifest,
+corresponding source, and canonical aliases for the Mac ZIP and Windows setup.
+All downloaded asset hashes and both alias pairs passed verification. The
+source revision in each platform manifest matches the tag.
+
+Checks completed for this draft:
+
+- All 22 local macOS CTests passed. The clean GitHub runner passed the six
+  portable CPU and protocol tests selected by the release workflow.
+- The exact downloaded Mac bundle passed strict signature verification and five
+  native module checks: repeated independent-view start/stop, Options lifecycle,
+  cached-model lifecycle, presentation lifecycle and session lifecycle. These
+  checks use isolated preferences and synthetic data. They do not establish
+  full-screen legacy-host behaviour or long-run memory performance.
+- Nine release/bootstrap boundary tests and all five installer packager tests
+  passed. The real installer compilation used NSIS 3.13 with solid zlib.
+- The exact downloaded Windows installer passed all eight native lifecycle
+  checks in the logged-on user session: name/version/registration, deleting the
+  downloaded setup, repeat installation, locked-file rejection, long-path and
+  short-path removal, and preservation of another selected saver and user file.
+  All 23 installed payload hashes matched the draft manifest. Independent
+  before/after snapshots confirmed restoration of the current managed
+  installation's Desktop and Apps registration, permanent saver binary,
+  preferences and cached model. The temporary task and all test files were
+  removed. This did not upgrade the permanent installation.
+- Nine Homebrew updater tests passed. The private cask for the exact downloaded
+  Mac ZIP passed Homebrew style and strict offline audit with no errors. The
+  ZIP identity, version, thin ARM64 bundle and macOS 11.0 target passed checks.
+
+Exact draft asset hashes:
+
+- Mac ZIP: `d07c56e999fbec6e5059ab9f14f2ef66ea93a0ce6173ee8638980a6b47a0b804`.
+- Windows setup: `97b303374bb6502dd3d88ab40b438fbee1ad56ccbf4da2ae2f281e3fa9cf5b08`.
+
+The public tap contains its initial source and documentation. A dedicated
+tap-only write key is configured for the source repository's published-release
+workflow. No cask has been published: its asset must be public before the updater
+can create a usable cask. Public download, the release-event update and public
+cask installation remain untested while the release is a draft.
